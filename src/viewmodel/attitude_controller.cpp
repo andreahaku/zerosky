@@ -71,8 +71,9 @@ void AttitudeController::start(const sky::Observer& observer, const std::string&
             service_.reset();
             return;
         }
-        model_ = orientation::GeomagneticModel::load(cof_file, error);
     }
+    // Loaded on any call, not only the first: a failed load is retried.
+    if (!model_) model_ = orientation::GeomagneticModel::load(cof_file, error);
     if (model_) {
         service_->set_geomagnetic_location(*model_, observer.latitude_deg, observer.longitude_deg,
                                            observer.height_m, decimal_year_now(), error);

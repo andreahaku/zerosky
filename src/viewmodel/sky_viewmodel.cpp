@@ -191,7 +191,9 @@ void SkyViewModel::start_attitude(const std::filesystem::path& cof_file) {
 }
 
 void SkyViewModel::restart_attitude() {
-    if (cof_missing_ || !location_set_) return;
+    // Waits for both: set_location() runs from the constructor, before the
+    // screen hands over the WMM path.
+    if (cof_file_.empty() || cof_missing_ || !location_set_) return;
     attitude_.start(observer_, hardware_, cof_file_);
 }
 

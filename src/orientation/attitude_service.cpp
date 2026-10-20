@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <optional>
 #include <utility>
 
 namespace zerosky::orientation {
@@ -53,6 +54,58 @@ sensors::Vec3 multiply(const Matrix3& a, sensors::Vec3 v) {
             a[2][0] * v.x + a[2][1] * v.y + a[2][2] * v.z};
 }
 
+double dot(sensors::Vec3 a, sensors::Vec3 b) {
+    return a.x * b.x + a.y * b.y + a.z * b.z;
+}
+
+Quaternion product(Quaternion a, Quaternion b) {
+    return {a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z,
+            a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
+            a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
+            a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w};
+}
+
+std::optional<Quaternion> initial_attitude(sensors::Vec3 accel,
+                                           sensors::Vec3 magnetic_body,
+                                           sensors::Vec3 magnetic_enu) {
+    constexpr double kGravity = 9.80665;
+    const double accel_norm = norm(accel);
+    const double body_field_norm = norm(magnetic_body);
+    const double world_field_norm = norm(magnetic_enu);
+    if (!finite(accel) || !finite(magnetic_body) || !finite(magnetic_enu) ||
+        std::abs(accel_norm - kGravity) > 0.1 * kGravity ||
+        body_field_norm < 1e-9 || world_field_norm < 1e-9) return std::nullopt;
+
+    const sensors::Vec3 up{accel.x / accel_norm, accel.y / accel_norm,
+                           accel.z / accel_norm};
+    const sensors::Vec3 body_field{magnetic_body.x / body_field_norm,
+                                   magnetic_body.y / body_field_norm,
+                                   magnetic_body.z / body_field_norm};
+    const sensors::Vec3 world_field{magnetic_enu.x / world_field_norm,
+                                    magnetic_enu.y / world_field_norm,
+                                    magnetic_enu.z / world_field_norm};
+    // A changed inclination can indicate local magnetic interference even
+    // when the field magnitude passes the magnetic gate.
+    if (std::abs(dot(up, body_field) - world_field.z) > 0.15 ||
+        std::hypot(world_field.x, world_field.y) < 0.2) return std::nullopt;
+
+    // Align measured gravity with ENU up, then rotate about ENU up until the
+    // horizontal magnetic field matches WMM. This also handles face-down poses.
+    Quaternion tilt{1.0 + up.z, up.y, -up.x, 0.0};
+    if (tilt.w < 1e-6) tilt = {0.0, 1.0, 0.0, 0.0};
+    else {
+        const double length = std::sqrt(tilt.w * tilt.w + tilt.x * tilt.x +
+                                        tilt.y * tilt.y);
+        tilt = {tilt.w / length, tilt.x / length, tilt.y / length, 0.0};
+    }
+    const sensors::Vec3 leveled = Mahony::rotate(tilt, body_field);
+    const double measured_horizontal = std::hypot(leveled.x, leveled.y);
+    if (measured_horizontal < 0.2) return std::nullopt;
+    const double yaw = std::atan2(leveled.x * world_field.y - leveled.y * world_field.x,
+                                  leveled.x * world_field.x + leveled.y * world_field.y);
+    return product({std::cos(yaw / 2.0), 0.0, 0.0, std::sin(yaw / 2.0)}, tilt);
+}
+
 } // namespace
 
 AttitudeService::AttitudeService(std::unique_ptr<sensors::Source> source)
@@ -71,6 +124,7 @@ bool AttitudeService::start(std::string& error) {
         previous_sample_at_ = {};
         last_magnetic_at_ = {};
         heading_good_since_ = {};
+        heading_seeded_ = false;
         heading_converged_ = false;
         magnetic_gate_.reset();
         filter_.reset();
@@ -110,6 +164,7 @@ bool AttitudeService::select_configuration(const std::string& hardware,
     magnetic_gate_.reset();
     last_magnetic_at_ = {};
     heading_good_since_ = {};
+    heading_seeded_ = false;
     heading_converged_ = false;
     latest_.compass = CompassStatus::Unreliable;
     return valid;
@@ -144,6 +199,7 @@ bool AttitudeService::set_frame_mapping(FrameMapping mapping, std::string& error
     filter_.reset();
     previous_sample_at_ = {};
     heading_good_since_ = {};
+    heading_seeded_ = false;
     heading_converged_ = false;
     latest_.compass = CompassStatus::Unreliable;
     return true;
@@ -163,6 +219,7 @@ void AttitudeService::set_magnetic_reference(MagneticReference reference) {
         magnetic_gate_.reset();
         last_magnetic_at_ = {};
         heading_good_since_ = {};
+        heading_seeded_ = false;
         heading_converged_ = false;
         latest_.compass = CompassStatus::Unreliable;
     }
@@ -273,6 +330,13 @@ void AttitudeService::process(const sensors::Sample& sample,
         magnetic_gate_.update(measured, expected, sample.sampled_at);
         last_magnetic_at_ = sample.sampled_at;
         if (magnetic_gate_.allow_magnetic_correction()) magnetic = body;
+    }
+    if (!heading_seeded_ && mapping_.verified && magnetic) {
+        if (const auto initial = initial_attitude(accel, *magnetic, reference_.field_enu_uT)) {
+            filter_.reset(*initial);
+            heading_seeded_ = true;
+            heading_good_since_ = {};
+        }
     }
     const bool updated = filter_.update(gyro, accel, magnetic,
                                        reference_.valid ? std::optional<sensors::Vec3>{reference_.field_enu_uT}

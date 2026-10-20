@@ -112,6 +112,7 @@ private:
     std::chrono::steady_clock::time_point previous_sample_at_{};
     std::chrono::steady_clock::time_point last_magnetic_at_{};
     std::chrono::steady_clock::time_point heading_good_since_{};
+    bool heading_seeded_ = false;
     bool heading_converged_ = false;
     AttitudeSnapshot latest_;
     bool capturing_ = false;
