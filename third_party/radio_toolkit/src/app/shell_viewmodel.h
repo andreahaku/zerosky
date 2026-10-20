@@ -1,0 +1,136 @@
+/*
+ * SPDX-FileCopyrightText: 2026 One Small Step Apps Ltd
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+#pragma once
+
+#include "nav_provider.h"
+#include "subjects.h"
+
+#include "lvgl.h"
+
+#include <string>
+#include <utility>
+#include <vector>
+
+namespace toolkit {
+
+// Generic app-shell state, decoupled from any concrete app. Holds the reactive
+// subjects the shared widgets (TitleBar, NavBar, BaseScreen) observe, plus a
+// pointer to the app's NavProvider (set by the app's viewmodel). An app's
+// viewmodel derives from this and also implements NavProvider.
+class ShellViewModel {
+public:
+    ShellViewModel();
+    virtual ~ShellViewModel() = default;
+
+    ShellViewModel(const ShellViewModel&) = delete;
+    ShellViewModel& operator=(const ShellViewModel&) = delete;
+
+    // --- dark mode ---
+    bool is_dark_mode() const;
+    void set_dark_mode(bool enabled);
+    void toggle_dark_mode();
+
+    // --- lifecycle ---
+    void request_quit();
+
+    // Exit code asking the Radio hub to close too: the user held ESC 3 s to go
+    // straight back to the system launcher.
+    static constexpr int kExitHome = 42;
+    void request_home() { exit_code_ = kExitHome; request_quit(); }
+    int exit_code() const { return exit_code_; }
+
+    // Quit, then replace this process with a sibling app (same PID, so a hub
+    // waiting on it keeps waiting): main() calls toolkit::run_handoff() once
+    // run_app has released the display. `app_dir` finds the binary in the dev
+    // build tree (apps/<app_dir>/<config>/<bin>); installed apps sit together.
+    struct Handoff {
+        std::string bin;
+        std::string app_dir;
+        std::vector<std::pair<std::string, std::string>> env;
+        bool pending() const { return !bin.empty(); }
+    };
+    void request_handoff(std::string bin, std::string app_dir,
+                         std::vector<std::pair<std::string, std::string>> env = {});
+    const Handoff& handoff() const { return handoff_; }
+
+    // TAB key: nothing by default; an app overrides it (e.g. SDR <-> Survey).
+    virtual void on_tab() {}
+
+    // Up/down keys (arrows, F/X): move the cursor of the visible list, like the
+    // NavBar up/down slots. Nothing by default; list pages override it.
+    virtual void on_up() {}
+    virtual void on_down() {}
+
+    // Left/right keys (arrows, Z/C): move along what the page shows, such as the
+    // tuned frequency or the selected aircraft. Nothing by default.
+    virtual void on_left() {}
+    virtual void on_right() {}
+
+    // Enter outside a dialog. Nothing by default.
+    virtual void on_enter() {}
+
+    // Volume keys (Fn + A/S/D): `step` -1 down, +1 up, 0 mute on/off. An app
+    // with audio returns the new state to show briefly, e.g. "Volume 60%";
+    // an empty string (the default) shows nothing.
+    virtual std::string on_volume(int step) {
+        (void)step;
+        return {};
+    }
+
+    // Help page opened with H (run_app shows it), as a path relative to the
+    // repository root, e.g. "docs/help/sdr.md"; empty = no help.
+    void set_help_doc(std::string relative_path) { help_doc_ = std::move(relative_path); }
+    const std::string& help_doc() const { return help_doc_; }
+
+    // --- NavBar tool page ---
+    void cycle_toolbar();   // slot 0: next tool page (wraps), then bump nav_refresh
+    void cycle_toolbar_back(); // slot 0 held: the page before (wraps)
+
+    // Long press on a NavBar key: slot 0 (key 4) is the page before, slots
+    // 1..4 ask the provider. nav_hold() returns a status to show, or "".
+    bool nav_has_hold(int slot) const;
+    std::string nav_hold(int slot);
+    bool nav_repeats(int slot) const; // the provider's, never slot 0
+    void bump_nav_refresh(); // force a NavBar re-render after slot labels change
+
+    // --- NavProvider wiring ---
+    void set_nav_provider(NavProvider* provider);
+    int nav_page_count() const; // delegates to the provider (1 if unset)
+
+    // What NavBar slot `slot` (0..4) does on the current page, for the key
+    // tooltip. Slot 0 is the page switcher; the rest come from the provider.
+    i18n::Text nav_hint(int slot) const;
+
+    // --- subject accessors (raw lv_subject_t* for the shared widgets) ---
+    lv_subject_t* dark_mode_subject();
+    lv_subject_t* current_page_subject();
+    lv_subject_t* quit_requested_subject();
+    lv_subject_t* toolbar_page_subject();
+    lv_subject_t* title_subject();
+    lv_subject_t* subtitle_subject();
+    lv_subject_t* nav_refresh_subject();
+
+    // --- text helpers (app sets these to drive the bars) ---
+    void set_title(const char* text);
+    void set_subtitle(const char* text);
+
+private:
+    NavProvider* nav_provider_{nullptr};
+    Handoff handoff_;
+    std::string help_doc_;
+    int exit_code_ = 0;
+
+    reactive::BoolSubject       dark_mode_subject_{true};
+    reactive::IntSubject        current_page_subject_{0};
+    reactive::BoolSubject       quit_requested_subject_{false};
+    reactive::IntSubject        toolbar_page_subject_{0};
+    reactive::StringSubject<32> title_subject_{""};
+    reactive::StringSubject<48> subtitle_subject_{""};
+    reactive::IntSubject        nav_refresh_subject_{0};
+};
+
+} // namespace toolkit

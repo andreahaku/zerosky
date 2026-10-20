@@ -1,0 +1,44 @@
+{
+  "package_name": "zerosky",
+  "version": "0.1.0",
+  "app_name": "ZeroSky",
+  "bin_name": "zerosky",
+  "description": "Pocket AR planetarium for CardputerZero: stars, constellations, planets, Sun and Moon where the device points",
+  "store": {
+    "summary": "Pocket AR planetarium: point the device at the sky and see what is there",
+    "description": "ZeroSky computes the sky from the time, your position and the orientation of the CardputerZero, and draws the stars, constellations, planets, Sun and Moon in the direction you point. Search for an object and an arrow guides you to it. The red night theme keeps your eyes adapted to the dark.",
+    "locales": {
+      "en": {
+        "summary": "Pocket AR planetarium: point the device at the sky and see what is there"
+      },
+      "it": {
+        "summary": "Planetario AR tascabile: punta il device verso il cielo e scopri cosa c'è"
+      }
+    },
+    "categories": [
+      "Education"
+    ],
+    "screenshots": [
+      "docs/media/sky.png",
+      "docs/media/find-on-screen.png",
+      "docs/media/find-arrow.png"
+    ],
+    "icon": "assets/images/zerosky.png",
+    "license": "MIT",
+    "source_repo": "https://github.com/andreahaku/zerosky",
+    "author": {
+      "github": "andreahaku",
+      "display_name": "Andrea Salvatore (IU4APC)"
+    },
+    "share_code": "ZSKY",
+    "permissions": {
+      "camera": false,
+      "microphone": false,
+      "imu": true,
+      "network": false,
+      "additional_hardware": true,
+      "background_service": false,
+      "external_display": false
+    }
+  }
+}

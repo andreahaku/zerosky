@@ -1,0 +1,14 @@
+/build/
+/.cache/
+/dist/
+compile_commands.json
+.DS_Store
+
+# Claude Code agent worktrees
+.claude/worktrees/
+
+# graphify knowledge-graph output
+graphify-out/
+
+# Session handover, local only (the public repo carries no handovers)
+/HANDOVER.md
