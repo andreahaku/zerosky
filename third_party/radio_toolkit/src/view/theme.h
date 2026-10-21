@@ -29,6 +29,14 @@ struct ThemePalette {
 
 ThemePalette palette(bool dark_mode);
 
+// zerosky: replaces the dark palette (pass nullptr to restore it). ZeroSky
+// uses it for its red night theme; widgets restyle on the next dark-mode change.
+void set_dark_palette_override(const ThemePalette* palette);
+
+// zerosky: the icon colour on the translucent overlay NavBar. White, or the
+// override's text colour in dark mode.
+lv_color_t overlay_foreground(bool dark_mode);
+
 // A colour picked for a dark background (e.g. an aircraft category), made
 // darker on the light theme so it still reads on white.
 lv_color_t readable(uint32_t rgb, bool dark_mode);

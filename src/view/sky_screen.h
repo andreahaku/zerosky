@@ -7,6 +7,7 @@
 #pragma once
 
 #include "base_screen.h"
+#include "camera_source.h"
 #include "beeper.h"
 #include "constellations.h"
 #include "deep_sky.h"
@@ -66,7 +67,7 @@ private:
     lv_obj_t* canvas_{nullptr};
     lv_obj_t* status_{nullptr};
     lv_obj_t* target_label_{nullptr};
-    int labels_night_{-1}; // the theme the labels are painted for; -1 before the first frame
+    int label_style_{-1}; // theme + photo the labels are painted for; -1 before the first frame
     audio::Beeper beeper_;
     std::array<lv_obj_t*, 8> cardinals_{};
     std::array<lv_obj_t*, 9> body_labels_{};
@@ -74,6 +75,12 @@ private:
     std::unique_ptr<toolkit::LocationDialog> location_dialog_;
     std::unique_ptr<view::widgets::TextViewer> about_;
     std::unique_ptr<SearchDialog> search_;
+    std::unique_ptr<camera::CameraSource> camera_;
+    camera::CameraFrame camera_frame_;
+    std::string camera_logged_error_;
+    void update_camera_source();
+    // True when a fresh camera frame was copied into the canvas this frame.
+    bool draw_camera_background();
 };
 
 } // namespace zerosky

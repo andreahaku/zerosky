@@ -96,7 +96,8 @@ void NavBar::set_overlay_mode() {
     // ...with white icons for contrast against the content colours.
     for (size_t i = 1; i < icon_buttons_.size(); ++i) { // slot 0 keeps its tab colours
         if (icon_buttons_[i]) {
-            icon_buttons_[i]->set_icon_color(lv_color_white());
+            // zerosky: was lv_color_white(), now follows the palette override.
+            icon_buttons_[i]->set_icon_color(view::overlay_foreground(shell_.is_dark_mode()));
         }
     }
 }
@@ -155,7 +156,9 @@ void NavBar::update_icon_buttons() {
             // White with black text on a dark bar, inverted on the light theme.
             // The overlay bar is a dark veil in both themes.
             const bool dark_bar = overlay_ || shell_.is_dark_mode();
-            button->set_tab_colors(dark_bar ? lv_color_white() : lv_color_black(),
+            // zerosky: the tab takes the overlay foreground instead of plain white.
+            button->set_tab_colors(dark_bar ? view::overlay_foreground(shell_.is_dark_mode())
+                                            : lv_color_black(),
                                    dark_bar ? lv_color_black() : lv_color_white());
             continue;
         } else {
@@ -172,7 +175,7 @@ void NavBar::update_icon_buttons() {
         button->set_text(placeholder ? "\xC2\xB7" : text); // middot placeholder
         button->set_enabled((i == 0) ? true : (!placeholder && enabled));
         if (overlay_) { // only slots 1..4 get here
-            button->set_icon_color(lv_color_white());
+            button->set_icon_color(view::overlay_foreground(shell_.is_dark_mode())); // zerosky
         }
     }
 

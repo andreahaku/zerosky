@@ -600,6 +600,26 @@ if(USE_DESKTOP)
 endif()
 
 # ====================================================
+# camera: the sky background (phase 2): a test pattern on the desktop,
+# rpicam-vid on the device (docs/plan-phase2.md)
+# ====================================================
+add_library(zerosky_camera STATIC src/camera/camera_source.cpp)
+target_include_directories(zerosky_camera PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src/camera)
+target_link_libraries(zerosky_camera PUBLIC radio_toolkit Threads::Threads)
+
+if(USE_DESKTOP)
+    add_executable(camera_source_test src/camera/camera_source_test.cpp)
+    target_link_libraries(camera_source_test PRIVATE zerosky_camera)
+    add_test(NAME camera_source_test COMMAND camera_source_test)
+endif()
+
+# ====================================================
+# zerosky_bench: times the sky refresh and a frame on the device CPU
+# ====================================================
+add_executable(zerosky_bench src/tools/bench_main.cpp)
+target_link_libraries(zerosky_bench PRIVATE zerosky_sky)
+
+# ====================================================
 # zerosky_probe: command-line sensor and calibration probe (docs/probe.md)
 # ====================================================
 add_executable(zerosky_probe src/tools/probe_main.cpp)
@@ -620,7 +640,8 @@ target_include_directories(zerosky PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/viewmodel
     ${CMAKE_CURRENT_SOURCE_DIR}/src/view
 )
-target_link_libraries(zerosky PRIVATE radio_toolkit zerosky_sensors zerosky_orientation zerosky_sky zerosky_audio)
+target_link_libraries(zerosky PRIVATE radio_toolkit zerosky_sensors zerosky_orientation zerosky_sky zerosky_audio
+    zerosky_camera)
 
 if(USE_DESKTOP)
     add_executable(search_filter_test src/view/search_dialog_test.cpp src/view/search_filter.cpp)

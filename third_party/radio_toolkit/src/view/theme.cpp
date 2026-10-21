@@ -10,6 +10,17 @@
 
 namespace view {
 
+namespace {
+// zerosky: the dark palette override, see set_dark_palette_override().
+bool g_dark_override_set = false;
+ThemePalette g_dark_override{};
+} // namespace
+
+void set_dark_palette_override(const ThemePalette* palette) {
+    g_dark_override_set = palette != nullptr;
+    if (palette) g_dark_override = *palette;
+}
+
 lv_color_t readable(uint32_t rgb, bool dark_mode) {
     if (dark_mode) return lv_color_hex(rgb);
     // 55 % of each channel: the pastel accents keep their hue but get the
@@ -19,7 +30,12 @@ lv_color_t readable(uint32_t rgb, bool dark_mode) {
                          static_cast<uint8_t>(scale(0)));
 }
 
+lv_color_t overlay_foreground(bool dark_mode) {
+    return dark_mode && g_dark_override_set ? g_dark_override.text : lv_color_white(); // zerosky
+}
+
 ThemePalette palette(bool dark_mode) {
+    if (dark_mode && g_dark_override_set) return g_dark_override; // zerosky
     if (dark_mode) {
         return {
             lv_color_hex(color::dark::kBody),

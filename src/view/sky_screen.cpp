@@ -18,6 +18,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 
 namespace zerosky {
 namespace {
@@ -45,6 +46,7 @@ struct SkyPalette {
     uint16_t deep_sky;  // galaxies, clusters and nebulae
     uint32_t text;      // label colour, 0xRRGGBB
     uint16_t (*star)(int level);
+    bool outlined{false}; // over a camera image: dark outlines, label backdrops
 };
 
 uint16_t night_star(int level) { return red565(level); }
@@ -60,7 +62,31 @@ const SkyPalette kDay{rgb565(8, 16, 40), rgb565(22, 28, 36), rgb565(110, 140, 19
                       rgb565(50, 90, 160), rgb565(255, 220, 120), rgb565(120, 210, 170),
                       0xe8eef8, day_star};
 
-const SkyPalette& sky_palette(bool night) { return night ? kNight : kDay; }
+// Over the camera image the marks must read on bright and dark areas alike:
+// brighter colours, drawn on a dark outline (Codex's proposal).
+uint16_t photo_night_star(int level) { return red565(std::max(level, 180)); }
+uint16_t photo_day_star(int) { return rgb565(255, 255, 255); }
+const SkyPalette kPhotoNight{0, 0, red565(255), rgb565(255, 60, 40), red565(255),
+                             rgb565(255, 90, 60), 0xff4030, photo_night_star, true};
+const SkyPalette kPhotoDay{0, 0, rgb565(255, 220, 60), rgb565(60, 220, 255), rgb565(255, 220, 120),
+                           rgb565(120, 255, 170), 0xffffff, photo_day_star, true};
+
+const SkyPalette& sky_palette(bool night, bool photo) {
+    if (photo) return night ? kPhotoNight : kPhotoDay;
+    return night ? kNight : kDay;
+}
+
+// A line, with a 3 px dark outline under it when the palette asks for one.
+void mark_line(uint16_t* buf, int x0, int y0, int x1, int y1, uint16_t color, bool outlined) {
+    if (outlined) {
+        for (int dy = -1; dy <= 1; ++dy) {
+            for (int dx = -1; dx <= 1; ++dx) {
+                if (dx != 0 || dy != 0) view::plot_line(buf, kW, kH, x0 + dx, y0 + dy, x1 + dx, y1 + dy, 0);
+            }
+        }
+    }
+    view::plot_line(buf, kW, kH, x0, y0, x1, y1, color);
+}
 
 double now_utc() {
     using namespace std::chrono;
@@ -71,6 +97,7 @@ double now_utc() {
 void draw_star(uint16_t* buf, int x, int y, float magnitude, const SkyPalette& pal) {
     const int level = std::clamp(static_cast<int>(255.0f - (magnitude + 1.5f) * 26.0f), 50, 255);
     const uint16_t color = pal.star(level);
+    if (pal.outlined) view::plot_disc(buf, kW, kH, x, y, magnitude < 1.0f ? 3 : 2, 0);
     if (magnitude < 1.0f) {
         view::plot_disc(buf, kW, kH, x, y, 2, color);
     } else if (magnitude < 2.5f) {
@@ -119,10 +146,34 @@ std::string deep_sky_search_name(const sky::DeepSkyObject& obj) {
     return obj.name.empty() ? obj.label() : obj.label() + " " + obj.name;
 }
 
+// The Moon with its phase: lit where x' >= (1 - 2k) * sqrt(r^2 - y'^2), with
+// x' along the screen direction to the Sun, y' across it, and k the lit
+// fraction. The unlit part is drawn dim, so the whole disc stays findable.
+void draw_moon(uint16_t* buf, int cx, int cy, int r, double sun_dx, double sun_dy,
+               double lit_fraction, uint16_t lit, uint16_t dark) {
+    const double len = std::hypot(sun_dx, sun_dy);
+    const double ux = len > 1e-9 ? sun_dx / len : 1.0;
+    const double uy = len > 1e-9 ? sun_dy / len : 0.0;
+    const double k = std::clamp(lit_fraction, 0.0, 1.0);
+    for (int dy = -r; dy <= r; ++dy) {
+        for (int dx = -r; dx <= r; ++dx) {
+            const double rr = static_cast<double>(dx * dx + dy * dy);
+            if (rr > r * r + 0.5) continue;
+            const int x = cx + dx;
+            const int y = cy + dy;
+            if (x < 0 || x >= kW || y < 0 || y >= kH) continue;
+            const double along = dx * ux + dy * uy;
+            const double across = -dx * uy + dy * ux;
+            const double half_chord = std::sqrt(std::max(0.0, r * r - across * across));
+            buf[y * kW + x] = along >= (1.0 - 2.0 * k) * half_chord ? lit : dark;
+        }
+    }
+}
+
 int body_radius(sky::Body body) {
     switch (body) {
         case sky::Body::Sun: return 6;
-        case sky::Body::Moon: return 5;
+        case sky::Body::Moon: return 6;
         case sky::Body::Venus:
         case sky::Body::Jupiter: return 3;
         default: return 2;
@@ -161,6 +212,7 @@ SkyScreen::SkyScreen(SkyViewModel& vm, app::AssetManager& assets)
 
 SkyScreen::~SkyScreen() {
     if (timer_) lv_timer_delete(timer_);
+    if (camera_) camera_->stop();
 }
 
 void SkyScreen::build_content(lv_obj_t* content) {
@@ -212,7 +264,49 @@ void SkyScreen::tick() {
         update_sky(utc);
     }
     vm_.update_camera();
+    update_camera_source();
     render();
+}
+
+// Starts the camera when its mode is on and releases it when off, so another
+// app can use the IMX219.
+void SkyScreen::update_camera_source() {
+    if (vm_.camera_on() && !camera_) {
+#if USE_DESKTOP
+        camera_ = std::make_unique<camera::TestPatternSource>();
+#else
+        camera_ = std::make_unique<camera::RpicamSource>();
+#endif
+        std::string error;
+        if (!camera_->start(error)) std::fprintf(stderr, "zerosky: camera: %s\n", error.c_str());
+    } else if (!vm_.camera_on() && camera_) {
+        camera_->stop();
+        camera_.reset();
+    }
+}
+
+bool SkyScreen::draw_camera_background() {
+    if (!camera_) return false;
+    // Log the camera state when it changes: the first frame, or a new error.
+    const std::string error = camera_->last_error();
+    if (error != camera_logged_error_) {
+        std::fprintf(stderr, "zerosky: camera: %s\n", error.empty() ? "ok" : error.c_str());
+        camera_logged_error_ = error;
+    }
+    if (!camera_->copy_latest(camera_frame_)) return false;
+    if (std::getenv("ZEROSKY_CAMERA_DEBUG")) {
+        std::fprintf(stderr, "zerosky: camera frame %llu, %zu px, age %lld ms\n",
+                     static_cast<unsigned long long>(camera_frame_.sequence), camera_frame_.rgb565.size(),
+                     static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                         std::chrono::steady_clock::now() - camera_frame_.captured_at).count()));
+    }
+    // An old frame is worse than none: fall back to the drawn sky.
+    if (std::chrono::steady_clock::now() - camera_frame_.captured_at > std::chrono::seconds(1)) {
+        return false;
+    }
+    if (camera_frame_.rgb565.size() != pixels_.size()) return false;
+    std::copy(camera_frame_.rgb565.begin(), camera_frame_.rgb565.end(), pixels_.begin());
+    return true;
 }
 
 void SkyScreen::update_sky(double utc) {
@@ -250,23 +344,32 @@ void SkyScreen::render() {
     const sky::Camera& cam = vm_.camera();
     const sky::Projection projection(cam, kW, kH);
     uint16_t* buf = pixels_.data();
-    const SkyPalette& pal = sky_palette(vm_.night_theme());
-    if (labels_night_ != vm_.night_theme()) {
-        labels_night_ = vm_.night_theme();
+    // The camera image, when it is on and fresh; otherwise the drawn sky and
+    // ground. The palette follows the frame actually drawn, not the Cam switch.
+    const bool photo = draw_camera_background();
+    const SkyPalette& pal = sky_palette(vm_.night_theme(), photo);
+    const int label_style = (vm_.night_theme() ? 1 : 0) + (photo ? 2 : 0);
+    if (label_style_ != label_style) {
+        label_style_ = label_style;
         auto paint = [&](lv_obj_t* label) {
             lv_obj_set_style_text_color(label, lv_color_hex(pal.text), 0);
+            // Over a photograph a translucent dark backdrop keeps the text readable.
+            lv_obj_set_style_bg_color(label, lv_color_black(), 0);
+            lv_obj_set_style_bg_opa(label, photo ? LV_OPA_60 : LV_OPA_TRANSP, 0);
+            lv_obj_set_style_pad_all(label, photo ? 2 : 0, 0);
         };
         for (auto* label : cardinals_) paint(label);
         for (auto* label : body_labels_) paint(label);
         paint(status_);
         paint(target_label_);
     }
-    std::fill(pixels_.begin(), pixels_.end(), pal.sky);
-
-    // The ground: a dim fill below the horizon, then the horizon line on top.
-    for (int y = 0; y < kH; ++y) {
-        for (int x = 0; x < kW; ++x) {
-            if (projection.below_horizon(x + 0.5, y + 0.5)) buf[y * kW + x] = pal.ground;
+    if (!photo) {
+        std::fill(pixels_.begin(), pixels_.end(), pal.sky);
+        // The ground: a dim fill below the horizon, then the horizon line on top.
+        for (int y = 0; y < kH; ++y) {
+            for (int x = 0; x < kW; ++x) {
+                if (projection.below_horizon(x + 0.5, y + 0.5)) buf[y * kW + x] = pal.ground;
+            }
         }
     }
     sky::ScreenPoint prev{};
@@ -274,8 +377,8 @@ void SkyScreen::render() {
         const auto p = projection.project(az, 0.0);
         if (p.visible && prev.visible && projection.on_screen(p, kW) &&
             projection.on_screen(prev, kW)) {
-            view::plot_line(buf, kW, kH, static_cast<int>(prev.x), static_cast<int>(prev.y),
-                            static_cast<int>(p.x), static_cast<int>(p.y), pal.horizon);
+            mark_line(buf, static_cast<int>(prev.x), static_cast<int>(prev.y),
+                      static_cast<int>(p.x), static_cast<int>(p.y), pal.horizon, pal.outlined);
         }
         prev = p;
     }
@@ -286,8 +389,8 @@ void SkyScreen::render() {
         const auto b = projection.project(seg[1].azimuth_deg, seg[1].altitude_deg);
         if (seg[0].altitude_deg < 0.0 && seg[1].altitude_deg < 0.0) continue; // below ground
         if (!projection.on_screen(a, kW) || !projection.on_screen(b, kW)) continue;
-        view::plot_line(buf, kW, kH, static_cast<int>(a.x), static_cast<int>(a.y),
-                        static_cast<int>(b.x), static_cast<int>(b.y), pal.figure);
+        mark_line(buf, static_cast<int>(a.x), static_cast<int>(a.y), static_cast<int>(b.x),
+                  static_cast<int>(b.y), pal.figure, pal.outlined);
     }
 
     const auto& stars = catalog_.stars();
@@ -314,6 +417,10 @@ void SkyScreen::render() {
         if (h.altitude_deg < -1.0) continue;
         const auto p = projection.project(h.azimuth_deg, h.altitude_deg);
         if (!projection.on_screen(p, 4)) continue;
+        if (pal.outlined) { // thin dark rings around the symbol, not a blot
+            view::plot_ring(buf, kW, kH, static_cast<int>(p.x), static_cast<int>(p.y), 5, 0);
+            view::plot_ring(buf, kW, kH, static_cast<int>(p.x), static_cast<int>(p.y), 2, 0);
+        }
         draw_deep_sky(buf, static_cast<int>(p.x), static_cast<int>(p.y), obj.kind, pal.deep_sky);
     }
 
@@ -324,8 +431,35 @@ void SkyScreen::render() {
         if (body.horizontal.altitude_deg < -1.0) continue; // set: not drawn on the ground
         const auto p = projection.project(body.horizontal.azimuth_deg, body.horizontal.altitude_deg);
         if (!projection.on_screen(p, 6)) continue;
-        view::plot_disc(buf, kW, kH, static_cast<int>(p.x), static_cast<int>(p.y),
-                        body_radius(body.body), pal.highlight);
+        if (pal.outlined) {
+            view::plot_disc(buf, kW, kH, static_cast<int>(p.x), static_cast<int>(p.y),
+                            body_radius(body.body) + 1, 0);
+        }
+        if (body.body == sky::Body::Moon) {
+            // The screen direction to the Sun: project a point a little way
+            // from the Moon towards the Sun.
+            double m[3], sun[3] = {0, 0, 0};
+            sky::enu_from_horizontal(body.horizontal.azimuth_deg, body.horizontal.altitude_deg, m);
+            for (const auto& other : bodies_) {
+                if (other.body == sky::Body::Sun) {
+                    sky::enu_from_horizontal(other.horizontal.azimuth_deg,
+                                             other.horizontal.altitude_deg, sun);
+                }
+            }
+            double t[3];
+            for (int k = 0; k < 3; ++k) t[k] = m[k] + 0.02 * sun[k];
+            const double t_alt = std::atan2(t[2], std::hypot(t[0], t[1])) * 180.0 / M_PI;
+            const double t_az = std::atan2(t[0], t[1]) * 180.0 / M_PI;
+            const auto toward = projection.project(t_az, t_alt);
+            const double sdx = toward.visible ? toward.x - p.x : 1.0;
+            const double sdy = toward.visible ? toward.y - p.y : 0.0;
+            const uint16_t dim = vm_.night_theme() ? red565(40) : rgb565(60, 60, 70);
+            draw_moon(buf, static_cast<int>(p.x), static_cast<int>(p.y), body_radius(body.body),
+                      sdx, sdy, body.phase_fraction, pal.highlight, dim);
+        } else {
+            view::plot_disc(buf, kW, kH, static_cast<int>(p.x), static_cast<int>(p.y),
+                            body_radius(body.body), pal.highlight);
+        }
         lv_label_set_text(body_labels_[i], body.name);
         place_label(body_labels_[i], p, body_radius(body.body) + 2, -6);
     }
@@ -425,7 +559,7 @@ void SkyScreen::render_guidance(uint16_t* buf, const sky::Projection& projection
         beeper_.stop();
         return;
     }
-    const uint16_t highlight = sky_palette(vm_.night_theme()).highlight;
+    const uint16_t highlight = sky_palette(vm_.night_theme(), label_style_ >= 2).highlight;
     const auto g = sky::guide(vm_.camera(), where.azimuth_deg, where.altitude_deg);
     // A target below the horizon keeps its arrow, so you know where it is,
     // but no beep: there is nothing to point at.

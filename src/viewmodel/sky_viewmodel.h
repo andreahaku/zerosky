@@ -22,8 +22,10 @@ class SkyViewModel : public toolkit::ShellViewModel, public toolkit::NavProvider
 public:
     SkyViewModel();
 
-    int nav_page_count() const override { return 2; }
-    const char* nav_page_name(int page) const override { return page == 0 ? "Sky" : "View"; }
+    int nav_page_count() const override { return 3; }
+    const char* nav_page_name(int page) const override {
+        return page == 0 ? "Sky" : page == 1 ? "View" : "Cam";
+    }
     void nav_fill(int page, NavSlot out[5]) const override;
     void nav_activate(int page, int slot) override;
     toolkit::i18n::Text nav_hint(int page, int slot) const override;
@@ -41,6 +43,11 @@ public:
     const sky::Camera& camera() const { return camera_; }
     // Daylight hides the faint stars; off, the sky is drawn as at night.
     bool daylight() const { return daylight_; }
+    // Camera background (phase 2). While it is on, the field of view is the
+    // lens one, not the zoom.
+    bool camera_on() const { return camera_on_; }
+    static double lens_fov_deg();
+
     // Night: red on black. Day: white and blue on dark blue.
     bool night_theme() const { return night_theme_; }
     const sky::Observer& observer() const { return observer_; }
@@ -107,6 +114,8 @@ private:
     bool manual_{false};
     bool daylight_{true};
     bool night_theme_{true};
+    bool camera_on_{false};
+    double zoom_fov_deg_{60.0}; // the zoom to restore when the camera goes off
     std::string hardware_{"none"};
     bool about_request_{false};
     bool cof_missing_{false};

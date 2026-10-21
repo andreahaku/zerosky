@@ -15,6 +15,10 @@ Every change is marked with a `zerosky:` comment. Find them with `grep -rn "zero
 
 - `app/run_app.cpp`: the SDL window title is `APP_DISPLAY_NAME` and the logger tag is `APP_NAME`.
 - `app/nav_hints.h`: the ESC hint names the launcher instead of the ZeroRadio menu.
+- `view/theme.{h,cpp}`: `set_dark_palette_override()` replaces the dark palette (ZeroSky's red
+  night theme), and `overlay_foreground()` gives the icon colour of the overlay NavBar.
+- `view/widgets/navbar.cpp`: the overlay NavBar icons and page tab use `overlay_foreground()`
+  instead of plain white.
 
 The shared position stays in `~/.config/zeroradio/location` on purpose, so ZeroSky and ZeroRadio use
 the same one.
