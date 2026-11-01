@@ -74,6 +74,35 @@ bool Projection::below_horizon(double x, double y) const {
     return forward_[2] + sx * right_[2] + sy * up_[2] < 0.0;
 }
 
+Camera offset_camera(const Camera& camera, double right_deg, double up_deg) {
+    double f[3], r[3], u[3];
+    camera_basis(camera, f, r, u);
+    const double tr = std::tan(right_deg * kDeg);
+    const double tu = std::tan(up_deg * kDeg);
+    double nf[3];
+    for (int i = 0; i < 3; ++i) nf[i] = f[i] + tr * r[i] + tu * u[i];
+    const double len = std::sqrt(dot(nf, nf));
+    for (double& c : nf) c /= len;
+
+    Camera out = camera;
+    out.altitude_deg = std::asin(std::fmax(-1.0, std::fmin(1.0, nf[2]))) / kDeg;
+    const double horizontal = std::hypot(nf[0], nf[1]);
+    if (horizontal > 1e-9) {
+        out.azimuth_deg = std::atan2(nf[0], nf[1]) / kDeg;
+        if (out.azimuth_deg < 0.0) out.azimuth_deg += 360.0;
+    }
+    // Roll: the screen up of the old camera, seen from the new direction.
+    double nu[3];
+    const double along = dot(u, nf);
+    for (int i = 0; i < 3; ++i) nu[i] = u[i] - along * nf[i];
+    Camera level = out;
+    level.roll_deg = 0.0;
+    double lf[3], lr[3], lu[3];
+    camera_basis(level, lf, lr, lu);
+    out.roll_deg = std::atan2(-dot(nu, lr), dot(nu, lu)) / kDeg;
+    return out;
+}
+
 Guidance guide(const Camera& camera, double target_azimuth_deg, double target_altitude_deg) {
     double f[3], r[3], u[3], v[3];
     camera_basis(camera, f, r, u);

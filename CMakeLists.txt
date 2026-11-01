@@ -6,7 +6,7 @@
 
 cmake_minimum_required(VERSION 3.31)
 
-project(zerosky VERSION 0.1.0 LANGUAGES C CXX)
+project(zerosky VERSION 1.0.0 LANGUAGES C CXX)
 
 # Public source repository: the package homepage.
 set(ZEROSKY_REPO_URL "https://github.com/andreahaku/zerosky")
@@ -487,6 +487,7 @@ add_library(zerosky_orientation STATIC
     src/orientation/attitude_service.cpp
     src/orientation/geomagnetic.cpp
     src/orientation/calibration_fit.cpp
+    src/orientation/calibration_flow.cpp
     src/orientation/camera_from_attitude.cpp
     src/orientation/frame_mapping_store.cpp
 )
@@ -510,6 +511,10 @@ if(USE_DESKTOP)
     add_executable(calibration_fit_test src/orientation/calibration_fit_test.cpp)
     target_link_libraries(calibration_fit_test PRIVATE zerosky_orientation)
     add_test(NAME calibration_fit_test COMMAND calibration_fit_test)
+
+    add_executable(calibration_flow_test src/orientation/calibration_flow_test.cpp)
+    target_link_libraries(calibration_flow_test PRIVATE zerosky_orientation)
+    add_test(NAME calibration_flow_test COMMAND calibration_flow_test)
 
     add_executable(camera_from_attitude_test src/orientation/camera_from_attitude_test.cpp)
     target_link_libraries(camera_from_attitude_test PRIVATE zerosky_orientation)
@@ -535,6 +540,7 @@ add_library(zerosky_sky STATIC
     src/sky/star_catalog.cpp
     src/sky/projection.cpp
     src/sky/constellations.cpp
+    src/sky/constellation_names.cpp
     src/sky/twilight.cpp
     src/sky/deep_sky.cpp
 )
@@ -562,6 +568,12 @@ if(USE_DESKTOP)
         LINES_TSV="${ZEROSKY_ASSETS_ROOT}/sky/constellations.tsv"
         STARS_TSV="${ZEROSKY_ASSETS_ROOT}/sky/stars.tsv")
     add_test(NAME constellations_test COMMAND constellations_test)
+
+    add_executable(constellation_names_test src/sky/constellation_names_test.cpp)
+    target_link_libraries(constellation_names_test PRIVATE zerosky_sky)
+    target_compile_definitions(constellation_names_test PRIVATE
+        NAMES_TSV="${ZEROSKY_ASSETS_ROOT}/sky/constellation_names.tsv")
+    add_test(NAME constellation_names_test COMMAND constellation_names_test)
 
     add_executable(twilight_test src/sky/twilight_test.cpp)
     target_link_libraries(twilight_test PRIVATE zerosky_sky)
@@ -632,8 +644,10 @@ add_executable(zerosky
     src/main.cpp
     src/viewmodel/sky_viewmodel.cpp
     src/viewmodel/attitude_controller.cpp
+    src/viewmodel/settings_store.cpp
     src/view/sky_screen.cpp
     src/view/search_dialog.cpp
+    src/view/calibration_dialog.cpp
     src/view/search_filter.cpp
 )
 target_include_directories(zerosky PRIVATE
@@ -644,6 +658,10 @@ target_link_libraries(zerosky PRIVATE radio_toolkit zerosky_sensors zerosky_orie
     zerosky_camera)
 
 if(USE_DESKTOP)
+    add_executable(settings_store_test src/viewmodel/settings_store_test.cpp src/viewmodel/settings_store.cpp)
+    target_include_directories(settings_store_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/viewmodel)
+    add_test(NAME settings_store_test COMMAND settings_store_test)
+
     add_executable(search_filter_test src/view/search_dialog_test.cpp src/view/search_filter.cpp)
     target_include_directories(search_filter_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/view)
     add_test(NAME search_filter_test COMMAND search_filter_test)
@@ -662,6 +680,30 @@ if(CMAKE_CROSSCOMPILING)
             DESTINATION "${ZEROSKY_PKG_DATADIR}")
     install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/third_party/wmm/WMM.COF"
             DESTINATION "${ZEROSKY_PKG_DATADIR}/wmm")
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/packaging/60-zerosky-bmm150.rules"
+            DESTINATION "lib/udev/rules.d")
+    # Preserve the copyright notices for code compiled into the binary.
+    set(ZEROSKY_PKG_LICENSEDIR "${ZEROSKY_PKG_DATADIR}/licenses")
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE"
+            DESTINATION "${ZEROSKY_PKG_LICENSEDIR}" RENAME "zerosky-MIT.txt")
+    install(FILES "${TOOLKIT_DIR}/LICENSE"
+            DESTINATION "${ZEROSKY_PKG_LICENSEDIR}" RENAME "radio-toolkit-MIT.txt")
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/third_party/astronomy/LICENSE"
+            DESTINATION "${ZEROSKY_PKG_LICENSEDIR}" RENAME "astronomy-engine-MIT.txt")
+    install(FILES "${LVGL_SOURCE_DIR}/LICENCE.txt"
+            DESTINATION "${ZEROSKY_PKG_LICENSEDIR}" RENAME "lvgl-MIT.txt")
+    install(FILES "${LVGL_SOURCE_DIR}/COPYRIGHTS.md"
+            DESTINATION "${ZEROSKY_PKG_LICENSEDIR}" RENAME "lvgl-COPYRIGHTS.md")
+    install(FILES "${LVGL_SOURCE_DIR}/src/libs/qrcode/LICENSE.txt"
+            DESTINATION "${ZEROSKY_PKG_LICENSEDIR}" RENAME "lvgl-qrcode-MIT.txt")
+    install(FILES "${LVGL_SOURCE_DIR}/src/libs/thorvg/LICENSE.txt"
+            DESTINATION "${ZEROSKY_PKG_LICENSEDIR}" RENAME "lvgl-thorvg-MIT.txt")
+    install(FILES "${LVGL_SOURCE_DIR}/src/libs/tjpgd/LICENSE.txt"
+            DESTINATION "${ZEROSKY_PKG_LICENSEDIR}" RENAME "lvgl-tjpgd-LICENSE.txt")
+    install(FILES "${LVGL_SOURCE_DIR}/src/stdlib/builtin/LICENSE_TLSF.txt"
+            DESTINATION "${ZEROSKY_PKG_LICENSEDIR}" RENAME "lvgl-tlsf-LICENSE.txt")
+    install(FILES "${LVGL_SOURCE_DIR}/src/stdlib/builtin/LICENSE_SPRINTF.txt"
+            DESTINATION "${ZEROSKY_PKG_LICENSEDIR}" RENAME "lvgl-sprintf-MIT.txt")
     # In-app help and credits (toolkit::read_doc), same relative paths as in the repository.
     install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/CREDITS.md" DESTINATION "${ZEROSKY_PKG_DATADIR}")
     install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/docs/help" DESTINATION "${ZEROSKY_PKG_DATADIR}/docs")
@@ -686,6 +728,9 @@ if(CMAKE_CROSSCOMPILING)
     set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE "arm64")
     set(CPACK_DEBIAN_PACKAGE_SECTION "science")
     set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+    # rpicam-vid for the camera background; the CJK fallback font for Japanese
+    # and Chinese, as in ZeroRadio.
+    set(CPACK_DEBIAN_PACKAGE_DEPENDS "rpicam-apps-core, fonts-droid-fallback, pipewire-alsa")
     set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
     include(CPack)
 endif()

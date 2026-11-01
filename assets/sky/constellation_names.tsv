@@ -1,0 +1,97 @@
+# Latin constellation names and J2000 label positions from d3-celestial 7e720a3de062059d4c5400a379146a601d9010e0 by Olaf Frohn.
+# Source: https://raw.githubusercontent.com/ofrohn/d3-celestial/7e720a3de062059d4c5400a379146a601d9010e0/data/constellations.json
+# Source SHA-256: ab4ae692027cbc042c0d6791a84456a65eb7c55656107fd00c58ff6e55d4d8b2
+# d3-celestial: BSD-3-Clause; adapted IAU / Sky & Telescope charts: CC BY 4.0.
+# Credits: IAU, Sky & Telescope, Roger Sinnott, Rick Fienberg, Alan MacRobert, Olaf Frohn.
+# Selected Latin names and GeoJSON Point positions; normalized RA to J2000 hours.
+# Serpens has two source points, Caput and Cauda, with the same Latin name.
+# abbr<TAB>latin_name<TAB>rank<TAB>ra_j2000_hours<TAB>dec_j2000_deg
+And	Andromeda	1	0.050000	43.00000
+Ant	Antlia	3	10.400000	-36.00000
+Aps	Apus	3	16.000000	-74.00000
+Aqr	Aquarius	2	22.500000	-5.00000
+Aql	Aquila	1	19.400000	8.00000
+Ara	Ara	3	17.200000	-56.00000
+Ari	Aries	1	2.800000	22.00000
+Aur	Auriga	1	5.500000	37.00000
+Boo	Bootes	1	14.900000	35.00000
+Cae	Caelum	3	4.900000	-42.00000
+Cam	Camelopardalis	2	5.600000	72.00000
+Cnc	Cancer	2	8.550000	27.00000
+CVn	Canes Venatici	2	12.800000	43.00000
+CMa	Canis Maior	1	6.500000	-26.00000
+CMi	Canis Minor	2	7.300000	5.00000
+Cap	Capricornus	2	21.000000	-22.00000
+Car	Carina	1	9.600000	-66.00000
+Cas	Cassiopeia	1	23.600000	55.50000
+Cen	Centaurus	1	13.300000	-40.00000
+Cep	Cepheus	2	22.500000	71.00000
+Cet	Cetus	1	1.900000	-5.00000
+Cha	Chamaeleon	3	12.600000	-81.00000
+Cir	Circinus	3	14.500000	-67.00000
+Col	Columba	3	5.700000	-39.00000
+Com	Coma Berenices	3	12.900000	24.00000
+CrA	Corona Australis	3	18.800000	-40.00000
+CrB	Corona Borealis	2	15.900000	32.00000
+Crv	Corvus	3	12.400000	-19.50000
+Crt	Crater	3	11.650000	-15.00000
+Cru	Crux	2	12.900000	-62.00000
+Cyg	Cygnus	1	20.500000	50.00000
+Del	Delphinus	3	20.600000	6.00000
+Dor	Dorado	3	5.100000	-64.00000
+Dra	Draco	2	17.900000	64.00000
+Equ	Equuleus	3	21.350000	11.50000
+Eri	Eridanus	1	3.500000	-18.00000
+For	Fornax	3	2.700000	-28.00000
+Gem	Gemini	1	7.150000	23.50000
+Gru	Grus	3	22.800000	-41.50000
+Her	Hercules	2	16.900000	35.00000
+Hor	Horologium	3	3.400000	-52.00000
+Hya	Hydra	2	10.000000	-22.00000
+Hyi	Hydrus	3	2.300000	-72.00000
+Ind	Indus	3	21.200000	-55.50000
+Lac	Lacerta	3	22.800000	47.00000
+Leo	Leo	1	10.600000	15.00000
+LMi	Leo Minor	3	10.500000	30.00000
+Lep	Lepus	3	5.900000	-25.00000
+Lib	Libra	2	15.400000	-26.00000
+Lup	Lupus	3	15.250000	-35.00000
+Lyn	Lynx	3	8.100000	49.00000
+Lyr	Lyra	2	18.600000	30.00000
+Men	Mensa	3	5.500000	-80.00000
+Mic	Microscopium	3	21.100000	-37.00000
+Mon	Monoceros	2	7.650000	-6.00000
+Mus	Musca	3	13.000000	-73.00000
+Nor	Norma	3	16.200000	-52.00000
+Oct	Octans	3	20.000000	-80.00000
+Oph	Ophiuchus	2	17.200000	3.00000
+Ori	Orion	1	5.600000	13.00000
+Pav	Pavo	2	19.800000	-62.00000
+Peg	Pegasus	1	22.300000	16.00000
+Per	Perseus	1	4.400000	45.00000
+Phe	Phoenix	2	1.100000	-43.00000
+Pic	Pictor	3	5.500000	-50.00000
+Psc	Pisces	2	1.300000	15.00000
+PsA	Piscis Austrinus	2	22.200000	-29.00000
+Pup	Puppis	2	7.400000	-46.00000
+Pyx	Pyxis	3	8.800000	-24.00000
+Ret	Reticulum	3	3.700000	-61.00000
+Sge	Sagitta	3	19.400000	18.00000
+Sgr	Sagittarius	1	19.500000	-34.00000
+Sco	Scorpius	1	16.600000	-38.00000
+Scl	Sculptor	3	0.100000	-33.00000
+Sct	Scutum	3	18.800000	-12.50000
+Ser	Serpens	3	15.500000	5.00000
+Ser	Serpens	3	18.700000	3.00000
+Sex	Sextans	3	10.500000	-7.00000
+Tau	Taurus	1	3.600000	15.00000
+Tel	Telescopium	3	18.500000	-54.00000
+Tri	Triangulum	3	1.800000	34.00000
+TrA	Triangulum Australe	2	16.000000	-67.50000
+Tuc	Tucana	3	23.200000	-64.00000
+UMa	Ursa Maior	1	11.000000	48.00000
+UMi	Ursa Minor	2	15.100000	68.00000
+Vel	Vela	2	9.550000	-46.00000
+Vir	Virgo	1	13.300000	-4.00000
+Vol	Volans	3	7.400000	-73.00000
+Vul	Vulpecula	3	19.700000	21.00000

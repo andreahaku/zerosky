@@ -15,12 +15,12 @@ namespace zerosky::orientation {
 // $XDG_CONFIG_HOME/zerosky/frame-mapping.json or ~/.config/zerosky/...
 std::filesystem::path default_frame_mapping_file();
 
-// A failed load resets result to an unverified mapping. Only a complete,
-// validated schema-1 file can set result.verified to true.
+// Schema 1 remains readable but does not verify mag_to_body. Schema 2 stores
+// all three measured sensor frames. A failed load resets the result.
 bool load_frame_mapping(const std::filesystem::path& file,
                         FrameMapping& result, std::string& error);
 
-// Requires mapping.verified. Writes a sibling temporary file, fsyncs it,
+// Requires both verified body and magnetic frames. Writes a sibling temporary file, fsyncs it,
 // backs up the previous complete file at .bak, then renames atomically.
 bool save_frame_mapping(const std::filesystem::path& file,
                         const FrameMapping& mapping, std::string& error);

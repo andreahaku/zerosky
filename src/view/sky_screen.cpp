@@ -8,6 +8,8 @@
 
 #include "asset_manager.h"
 #include "docs.h"
+#include "i18n.h"
+#include "sky_text.h"
 #include "location.h"
 #include "projection.h"
 #include "raster.h"
@@ -26,7 +28,43 @@ namespace {
 constexpr int kW = view::kScreenWidth;
 constexpr int kH = view::kScreenHeight;
 constexpr double kSkyRefreshSeconds = 10.0;
-constexpr const char* kCardinals[8] = {"N", "NE", "E", "SE", "S", "SW", "W", "NW"};
+using toolkit::i18n::pick;
+
+const char* body_name(sky::Body body) { return pick(text::kBodies[static_cast<int>(body)]); }
+
+// The attitude controller reports in English; the screen shows the user's language.
+std::string localized_attitude(const std::string& status) {
+    if (status == "manual") return pick(text::kManual);
+    if (status == "tilt only") return pick(text::kTiltOnly);
+    if (status == "compass disturbed") return pick(text::kCompassDisturbed);
+    if (status == "axes not measured") return pick(text::kAxesNotMeasured);
+    if (status == "no IMU") return pick(text::kNoImu);
+    if (status == "bad axes file") return pick(text::kBadAxes);
+    if (status == "IMU did not start") return pick(text::kImuFailed);
+    if (status == "no WMM data") return pick(text::kNoWmm);
+    return status;
+}
+
+// Japanese and Chinese: Inter draws the Latin text and a system CJK font the
+// rest, as the toolkit does for its tooltips. Debian paths, then Arch.
+void attach_cjk_fallback(app::AssetManager& assets, lv_font_t* font, uint32_t size) {
+    const auto lang = toolkit::i18n::current();
+    if (!font || !toolkit::i18n::needs_cjk_font(lang)) return;
+    static constexpr const char* kJapanese[] = {
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf"};
+    static constexpr const char* kChinese[] = {
+        "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc"};
+    for (const char* path : lang == toolkit::i18n::Lang::Ja ? kJapanese : kChinese) {
+        if (lv_font_t* cjk = assets.load_font(path, size)) {
+            font->fallback = cjk;
+            return;
+        }
+    }
+}
 
 constexpr uint16_t rgb565(int r, int g, int b) {
     return static_cast<uint16_t>(((std::clamp(r, 0, 255) >> 3) << 11) |
@@ -180,11 +218,42 @@ int body_radius(sky::Body body) {
     }
 }
 
+// Upper case for the status lines, which read better that way on 320x170.
+// Handles ASCII and the Latin-1 letters of the European languages; CJK text
+// and other characters pass through unchanged.
+std::string upper(const std::string& in) {
+    std::string out;
+    out.reserve(in.size());
+    for (size_t i = 0; i < in.size(); ++i) {
+        const auto c = static_cast<unsigned char>(in[i]);
+        if (c >= 'a' && c <= 'z') {
+            out += static_cast<char>(c - 32);
+        } else if (c == 0xC3 && i + 1 < in.size()) {
+            // U+00E0..U+00FE (except the division sign) map to U+00C0..U+00DE.
+            const auto next = static_cast<unsigned char>(in[i + 1]);
+            out += static_cast<char>(c);
+            out += static_cast<char>(next >= 0xA0 && next <= 0xBE && next != 0xB7 ? next - 0x20 : next);
+            ++i;
+        } else {
+            out += static_cast<char>(c);
+        }
+    }
+    return out;
+}
+
 lv_obj_t* make_label(lv_obj_t* parent, const lv_font_t* font) {
     auto* label = lv_label_create(parent);
     lv_obj_set_style_text_font(label, font, 0);
     lv_obj_add_flag(label, LV_OBJ_FLAG_HIDDEN);
     return label;
+}
+
+struct LabelBox { int x, y, w, h; };
+
+bool overlaps(const LabelBox& a, const LabelBox& b) {
+    constexpr int gap = 3;
+    return a.x < b.x + b.w + gap && b.x < a.x + a.w + gap &&
+           a.y < b.y + b.h + gap && b.y < a.y + a.h + gap;
 }
 
 // Places a label next to a point, kept inside the screen.
@@ -204,6 +273,8 @@ SkyScreen::SkyScreen(SkyViewModel& vm, app::AssetManager& assets)
     : BaseScreen(vm, vm, assets), vm_(vm) {
     catalog_ = sky::StarCatalog::load(assets.resolve("sky/stars.tsv").string());
     lines_ = sky::ConstellationLines::load(assets.resolve("sky/constellations.tsv").string());
+    constellation_names_ = sky::ConstellationNames::load(
+        assets.resolve("sky/constellation_names.tsv").string());
     deep_sky_ = sky::DeepSkyCatalog::load(assets.resolve("sky/deep_sky.tsv").string());
     init();
     vm_.start_attitude(assets.resolve("wmm/WMM.COF"));
@@ -228,20 +299,63 @@ void SkyScreen::build_content(lv_obj_t* content) {
 
     auto* small = assets().load_font("inter-medium.ttf", 10);
     auto* medium = assets().load_font("inter-semibold.ttf", 12);
+    attach_cjk_fallback(assets(), small, 10);
+    attach_cjk_fallback(assets(), medium, 12);
+    // The NavBar's text and page-tab fonts: the asset manager hands out the
+    // same font objects, so the fallback reaches the bar too.
+    attach_cjk_fallback(assets(), assets().load_font("inter-semibold.ttf", 16), 16);
+    attach_cjk_fallback(assets(), assets().load_font("inter-bold.ttf", 13), 13);
+    // The dialogs' and text viewer's fonts: help, About, Location and Find.
+    attach_cjk_fallback(assets(), assets().load_font("inter-semibold.ttf", 14), 14);
+    attach_cjk_fallback(assets(), assets().load_font("inter-regular.ttf", 12), 12);
     const lv_font_t* small_font = small ? small : &lv_font_montserrat_12;
     const lv_font_t* medium_font = medium ? medium : &lv_font_montserrat_12;
 
     for (size_t i = 0; i < cardinals_.size(); ++i) {
         cardinals_[i] = make_label(content, medium_font);
-        lv_label_set_text(cardinals_[i], kCardinals[i]);
+        lv_label_set_text(cardinals_[i], pick(text::kCardinals[i]));
     }
     for (auto*& label : body_labels_) label = make_label(content, small_font);
+    for (auto*& label : constellation_labels_) label = make_label(content, small_font);
+    for (auto*& label : deep_labels_) label = make_label(content, small_font);
 
     target_label_ = make_label(content, medium_font);
 
+    // Two short lines instead of one long one, so nothing is cut off: the
+    // camera numbers and the position on top, mode and warnings below.
     status_ = make_label(content, small_font);
     lv_obj_set_pos(status_, 3, 2);
     lv_obj_remove_flag(status_, LV_OBJ_FLAG_HIDDEN);
+    // The labels are as wide as their text, so a backdrop over the photo
+    // covers only the words; long text is cut with dots at the maximum width.
+    place_ = make_label(content, small_font);
+    lv_obj_set_width(place_, LV_SIZE_CONTENT);
+    lv_obj_set_style_max_width(place_, 130, 0);
+    lv_label_set_long_mode(place_, LV_LABEL_LONG_DOT);
+    lv_obj_align(place_, LV_ALIGN_TOP_RIGHT, -3, 2);
+    lv_obj_remove_flag(place_, LV_OBJ_FLAG_HIDDEN);
+    notice_ = make_label(content, small_font);
+    lv_obj_set_width(notice_, LV_SIZE_CONTENT);
+    lv_obj_set_style_max_width(notice_, kW - 6, 0);
+    lv_label_set_long_mode(notice_, LV_LABEL_LONG_DOT);
+    lv_obj_set_pos(notice_, 3, 18);
+
+    // The box for "starting camera" and the Align steps.
+    panel_ = lv_obj_create(content);
+    lv_obj_remove_style_all(panel_);
+    lv_obj_set_style_bg_color(panel_, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(panel_, LV_OPA_80, 0);
+    lv_obj_set_style_radius(panel_, 4, 0);
+    lv_obj_set_style_border_width(panel_, 1, 0);
+    lv_obj_set_style_pad_all(panel_, 5, 0);
+    lv_obj_set_width(panel_, kW - 40);
+    lv_obj_set_height(panel_, LV_SIZE_CONTENT);
+    lv_obj_clear_flag(panel_, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(panel_, LV_OBJ_FLAG_HIDDEN);
+    panel_text_ = lv_label_create(panel_);
+    lv_obj_set_width(panel_text_, LV_PCT(100));
+    lv_label_set_long_mode(panel_text_, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_font(panel_text_, small_font, 0);
 }
 
 void SkyScreen::tick_cb(lv_timer_t* timer) {
@@ -249,6 +363,17 @@ void SkyScreen::tick_cb(lv_timer_t* timer) {
 }
 
 void SkyScreen::tick() {
+    if (calibration_ && !calibration_->is_open()) calibration_.reset();
+    if (!calibration_ && vm_.take_calibration_request()) {
+        beeper_.stop();
+        calibration_ = std::make_unique<CalibrationDialog>(vm_, assets(), beeper_,
+                                                            vm_.is_dark_mode());
+        return;
+    }
+    if (calibration_) {
+        calibration_->tick();
+        return; // The full-screen modal owns the display during capture.
+    }
     if (location_dialog_ && !location_dialog_->is_open()) location_dialog_.reset();
     if (!location_dialog_ && (vm_.take_location_request() || vm_.take_first_location_prompt())) {
         open_location_dialog();
@@ -279,6 +404,7 @@ void SkyScreen::update_camera_source() {
 #endif
         std::string error;
         if (!camera_->start(error)) std::fprintf(stderr, "zerosky: camera: %s\n", error.c_str());
+        camera_started_at_ = std::chrono::steady_clock::now();
     } else if (!vm_.camera_on() && camera_) {
         camera_->stop();
         camera_.reset();
@@ -323,6 +449,12 @@ void SkyScreen::update_sky(double utc) {
             {sky::star_horizontal(seg.a.ra_hours, seg.a.dec_deg, utc, observer),
              sky::star_horizontal(seg.b.ra_hours, seg.b.dec_deg, utc, observer)});
     }
+    constellation_name_positions_.clear();
+    constellation_name_positions_.reserve(constellation_names_.names().size());
+    for (const auto& name : constellation_names_.names()) {
+        constellation_name_positions_.push_back(
+            sky::star_horizontal(name.ra_hours, name.dec_deg, utc, observer));
+    }
     deep_sky_positions_.clear();
     deep_sky_positions_.reserve(deep_sky_.objects().size());
     for (const auto& obj : deep_sky_.objects()) {
@@ -341,7 +473,7 @@ void SkyScreen::update_sky(double utc) {
 }
 
 void SkyScreen::render() {
-    const sky::Camera& cam = vm_.camera();
+    const sky::Camera cam = vm_.camera();
     const sky::Projection projection(cam, kW, kH);
     uint16_t* buf = pixels_.data();
     // The camera image, when it is on and fresh; otherwise the drawn sky and
@@ -357,11 +489,22 @@ void SkyScreen::render() {
             lv_obj_set_style_bg_color(label, lv_color_black(), 0);
             lv_obj_set_style_bg_opa(label, photo ? LV_OPA_60 : LV_OPA_TRANSP, 0);
             lv_obj_set_style_pad_all(label, photo ? 2 : 0, 0);
+            lv_obj_set_style_radius(label, 4, 0);
         };
         for (auto* label : cardinals_) paint(label);
         for (auto* label : body_labels_) paint(label);
+        for (auto* label : constellation_labels_) {
+            paint(label);
+            lv_obj_set_style_text_color(label, lv_color_hex(
+                photo ? pal.text : vm_.night_theme() ? 0xa84938 : 0xaac7f0), 0);
+        }
+        for (auto* label : deep_labels_) paint(label);
         paint(status_);
+        paint(place_);
+        paint(notice_);
         paint(target_label_);
+        lv_obj_set_style_text_color(panel_text_, lv_color_hex(pal.text), 0);
+        lv_obj_set_style_border_color(panel_, lv_color_hex(pal.text), 0);
     }
     if (!photo) {
         std::fill(pixels_.begin(), pixels_.end(), pal.sky);
@@ -385,6 +528,7 @@ void SkyScreen::render() {
 
     // Constellation figures, dim, under the stars.
     for (const auto& seg : line_positions_) {
+        if (vm_.constellation_display() == ConstellationDisplay::Off) break;
         const auto a = projection.project(seg[0].azimuth_deg, seg[0].altitude_deg);
         const auto b = projection.project(seg[1].azimuth_deg, seg[1].altitude_deg);
         if (seg[0].altitude_deg < 0.0 && seg[1].altitude_deg < 0.0) continue; // below ground
@@ -410,7 +554,8 @@ void SkyScreen::render() {
     const double deep_limit = 7.0 + 2.0 * (60.0 / cam.fov_deg - 1.0);
     const bool deep_dimmed = vm_.daylight() && twilight_magnitude_ < 4.0;
     const auto& deep = deep_sky_.objects();
-    for (size_t i = 0; !deep_dimmed && i < deep.size() && i < deep_sky_positions_.size(); ++i) {
+    for (size_t i = 0; vm_.deep_sky_visible() && !deep_dimmed && i < deep.size() &&
+                       i < deep_sky_positions_.size(); ++i) {
         const auto& obj = deep[i];
         if (obj.messier.empty() && !(obj.magnitude <= deep_limit)) continue;
         const auto& h = deep_sky_positions_[i];
@@ -460,7 +605,7 @@ void SkyScreen::render() {
             view::plot_disc(buf, kW, kH, static_cast<int>(p.x), static_cast<int>(p.y),
                             body_radius(body.body), pal.highlight);
         }
-        lv_label_set_text(body_labels_[i], body.name);
+        lv_label_set_text(body_labels_[i], body_name(body.body));
         place_label(body_labels_[i], p, body_radius(body.body) + 2, -6);
     }
 
@@ -473,21 +618,171 @@ void SkyScreen::render() {
 
     render_guidance(buf, projection);
 
-    // Status: the camera, the position, and why the IMU is not steering, if so.
-    std::string note = vm_.location_set() ? vm_.location_label() : "no position: press 5";
-    const std::string attitude = vm_.attitude_status();
-    if (!attitude.empty()) note += "  " + attitude;
-    else if (vm_.manual()) note += "  manual";
-    char status[128];
-    std::snprintf(status, sizeof status, "Az %03.0f  Alt %+03.0f  FOV %.0f  %s",
-                  cam.azimuth_deg, cam.altitude_deg, cam.fov_deg, note.c_str());
+    // Keep the new labels away from the status, NavBar and existing object
+    // names. A small fixed pool avoids creating hundreds of LVGL objects for
+    // the 605 deep-sky entries, and the projected points still track the sky.
+    for (auto* label : constellation_labels_) lv_obj_add_flag(label, LV_OBJ_FLAG_HIDDEN);
+    for (auto* label : deep_labels_) lv_obj_add_flag(label, LV_OBJ_FLAG_HIDDEN);
+    std::vector<LabelBox> occupied{{0, 0, kW, 34}, {0, 143, kW, kH - 143}};
+    const auto reserve_visible = [&](lv_obj_t* label) {
+        if (!lv_obj_has_flag(label, LV_OBJ_FLAG_HIDDEN)) {
+            lv_obj_update_layout(label);
+            occupied.push_back({static_cast<int>(lv_obj_get_x(label)),
+                                static_cast<int>(lv_obj_get_y(label)),
+                                static_cast<int>(lv_obj_get_width(label)),
+                                static_cast<int>(lv_obj_get_height(label))});
+        }
+    };
+    for (auto* label : body_labels_) reserve_visible(label);
+    for (auto* label : cardinals_) reserve_visible(label);
+    reserve_visible(target_label_);
+    const auto place_new_label = [&](lv_obj_t* label, const std::string& name,
+                                     const sky::ScreenPoint& p, bool beside_symbol) {
+        lv_label_set_text(label, name.c_str());
+        lv_obj_remove_flag(label, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_update_layout(label);
+        const int w = static_cast<int>(lv_obj_get_width(label));
+        const int h = static_cast<int>(lv_obj_get_height(label));
+        const int y = static_cast<int>(std::lround(p.y)) - h / 2;
+        int x = static_cast<int>(std::lround(p.x)) + (beside_symbol ? 7 : -w / 2);
+        if (beside_symbol && x + w > kW - 2)
+            x = static_cast<int>(std::lround(p.x)) - w - 7;
+        const LabelBox box{x, y, w, h};
+        if (x < 2 || x + w > kW - 2 || y < 34 || y + h > 142 ||
+            std::any_of(occupied.begin(), occupied.end(),
+                        [&](const LabelBox& other) { return overlaps(box, other); })) {
+            lv_obj_add_flag(label, LV_OBJ_FLAG_HIDDEN);
+            return false;
+        }
+        lv_obj_set_pos(label, x, y);
+        occupied.push_back(box);
+        return true;
+    };
+
+    if (vm_.deep_sky_visible() && !deep_dimmed) {
+        std::vector<size_t> order;
+        order.reserve(deep.size());
+        for (size_t i = 0; i < deep.size() && i < deep_sky_positions_.size(); ++i) {
+            if (!deep[i].messier.empty() || deep[i].magnitude <= deep_limit) order.push_back(i);
+        }
+        std::stable_sort(order.begin(), order.end(), [&](size_t a, size_t b) {
+            const bool ma = !deep[a].messier.empty(), mb = !deep[b].messier.empty();
+            if (ma != mb) return ma;
+            const double aa = std::isfinite(deep[a].magnitude) ? deep[a].magnitude : 99.0;
+            const double bb = std::isfinite(deep[b].magnitude) ? deep[b].magnitude : 99.0;
+            return aa < bb;
+        });
+        size_t used = 0;
+        for (const size_t i : order) {
+            if (used == deep_labels_.size()) break;
+            const auto& h = deep_sky_positions_[i];
+            if (h.altitude_deg < -1.0) continue;
+            const auto p = projection.project(h.azimuth_deg, h.altitude_deg);
+            if (!projection.on_screen(p, 8)) continue;
+            if (place_new_label(deep_labels_[used], deep[i].label(), p, true)) ++used;
+        }
+    }
+    if (vm_.constellation_display() == ConstellationDisplay::Names) {
+        std::vector<size_t> order;
+        const auto& names = constellation_names_.names();
+        order.reserve(names.size());
+        for (size_t i = 0; i < names.size() && i < constellation_name_positions_.size(); ++i)
+            order.push_back(i);
+        std::stable_sort(order.begin(), order.end(), [&](size_t a, size_t b) {
+            return names[a].rank < names[b].rank;
+        });
+        size_t used = 0;
+        for (const size_t i : order) {
+            if (used == constellation_labels_.size()) break;
+            const auto& h = constellation_name_positions_[i];
+            if (h.altitude_deg < 0.0) continue;
+            const auto p = projection.project(h.azimuth_deg, h.altitude_deg);
+            if (!projection.on_screen(p, 8)) continue;
+            if (place_new_label(constellation_labels_[used], names[i].latin_name, p, false)) ++used;
+        }
+    }
+
+    // Status: the camera numbers, the position, and on the second line the
+    // mode or why the IMU is not steering.
+    char status[64];
+    std::snprintf(status, sizeof status, "AZ %03.0f  ALT %+03.0f  FOV %.0f", cam.azimuth_deg,
+                  cam.altitude_deg, cam.fov_deg);
     lv_label_set_text(status_, status);
+    lv_label_set_text(place_, upper(vm_.location_set() ? vm_.location_label()
+                                                       : std::string(pick(text::kNoPosition))).c_str());
+
+    std::string notice;
+    const std::string attitude = vm_.attitude_status();
+    if (vm_.aligning()) {
+        char align[96];
+        std::snprintf(align, sizeof align, pick(text::kAlignStatus), vm_.alignment().fov_deg,
+                      vm_.alignment().right_offset_deg, vm_.alignment().up_offset_deg);
+        notice = align;
+    } else {
+        if (!attitude.empty()) notice = localized_attitude(attitude);
+        else if (vm_.manual()) notice = pick(text::kManual);
+        // The lens FOV is an estimate until an alignment is saved.
+        if (vm_.camera_on() && !vm_.alignment().measured) {
+            if (!notice.empty()) notice += "  ";
+            notice += pick(text::kFovEstimate);
+        }
+    }
+    notice = upper(notice);
+    lv_label_set_text(notice_, notice.c_str());
+    if (notice.empty()) lv_obj_add_flag(notice_, LV_OBJ_FLAG_HIDDEN);
+    else lv_obj_remove_flag(notice_, LV_OBJ_FLAG_HIDDEN);
+
+    // Align: a crosshair on the screen centre, the point the offsets move.
+    if (vm_.aligning()) {
+        const uint16_t c = pal.highlight;
+        mark_line(buf, kW / 2 - 8, kH / 2, kW / 2 - 3, kH / 2, c, true);
+        mark_line(buf, kW / 2 + 3, kH / 2, kW / 2 + 8, kH / 2, c, true);
+        mark_line(buf, kW / 2, kH / 2 - 8, kW / 2, kH / 2 - 3, c, true);
+        mark_line(buf, kW / 2, kH / 2 + 3, kW / 2, kH / 2 + 8, c, true);
+    }
+    update_panel(photo);
     lv_obj_invalidate(canvas_);
+}
+
+// The panel tells what the user cannot see: the camera still starting (or
+// failing), and the Align steps while aligning.
+void SkyScreen::update_panel(bool photo) {
+    const char* text = nullptr;
+    bool centred = true;
+    if (vm_.language_version() != seen_language_version_) {
+        seen_language_version_ = vm_.language_version();
+        language_note_until_ = std::chrono::steady_clock::now() + std::chrono::seconds(4);
+    }
+    if (vm_.camera_on() && camera_ && !photo) {
+        const bool late = std::chrono::steady_clock::now() - camera_started_at_ > std::chrono::seconds(10);
+        text = pick(late ? text::kCameraFailed : text::kCameraStarting);
+    } else if (language_note_until_ > std::chrono::steady_clock::now()) {
+        text = pick(vm_.language_saved() ? text::kLanguageRestart : text::kLanguageNotSaved);
+    } else if (vm_.aligning()) {
+        // The steps for 10 s from when the panel is first free in Align (after
+        // the camera start-up or a language note); then the sky stays clear.
+        const auto now = std::chrono::steady_clock::now();
+        if (!align_steps_started_) {
+            align_started_at_ = now;
+            align_steps_started_ = true;
+        }
+        if (now - align_started_at_ < std::chrono::seconds(10)) text = pick(text::kAlignSteps);
+        centred = false; // keep the centre free for the crosshair and the star
+    }
+    if (!vm_.aligning()) align_steps_started_ = false;
+    if (!text) {
+        lv_obj_add_flag(panel_, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
+    lv_label_set_text(panel_text_, text);
+    if (centred) lv_obj_align(panel_, LV_ALIGN_CENTER, 0, -10);
+    else lv_obj_align(panel_, LV_ALIGN_TOP_MID, 0, 30);
+    lv_obj_remove_flag(panel_, LV_OBJ_FLAG_HIDDEN);
 }
 
 bool SkyScreen::locate(const std::string& name, sky::Horizontal& out) const {
     for (const auto& body : bodies_) {
-        if (name == body.name) {
+        if (name == body.name || name == body_name(body.body)) {
             out = body.horizontal;
             return true;
         }
@@ -521,24 +816,22 @@ bool SkyScreen::locate(const std::string& name, sky::Horizontal& out) const {
 void SkyScreen::open_search() {
     std::vector<SearchItem> items;
     for (const auto& body : bodies_) {
-        const char* kind = body.body == sky::Body::Sun ? "Sun"
-                         : body.body == sky::Body::Moon ? "Moon" : "planet";
-        items.push_back({body.name, kind, body.horizontal.altitude_deg > 0.0});
+        const char* kind = body.body == sky::Body::Sun ? pick(text::kKindSun)
+                         : body.body == sky::Body::Moon ? pick(text::kKindMoon) : pick(text::kKindPlanet);
+        items.push_back({body_name(body.body), kind, body.horizontal.altitude_deg > 0.0});
     }
     const auto& stars = catalog_.stars();
     for (size_t i = 0; i < stars.size() && i < star_positions_.size(); ++i) {
         if (stars[i].name.empty()) continue;
         char detail[48];
-        std::snprintf(detail, sizeof detail, "star mag %.1f %s", stars[i].magnitude,
-                      stars[i].constellation.c_str());
+        std::snprintf(detail, sizeof detail, "%s mag %.1f %s", pick(text::kKindStar),
+                      stars[i].magnitude, stars[i].constellation.c_str());
         items.push_back({stars[i].name, detail, star_positions_[i].altitude_deg > 0.0});
     }
-    static const char* const kKindNames[] = {"galaxy", "open cluster", "globular cluster",
-                                             "nebula", "planetary nebula", "deep sky"};
     const auto& deep = deep_sky_.objects();
     for (size_t i = 0; i < deep.size() && i < deep_sky_positions_.size(); ++i) {
         char detail[48];
-        std::snprintf(detail, sizeof detail, "%s %s", kKindNames[static_cast<int>(deep[i].kind)],
+        std::snprintf(detail, sizeof detail, "%s %s", pick(text::kDeepSkyKinds[static_cast<int>(deep[i].kind)]),
                       deep[i].constellation.c_str());
         items.push_back({deep_sky_search_name(deep[i]), detail,
                          deep_sky_positions_[i].altitude_deg > 0.0});
@@ -569,8 +862,8 @@ void SkyScreen::render_guidance(uint16_t* buf, const sky::Projection& projection
 
     const auto p = projection.project(where.azimuth_deg, where.altitude_deg);
     char text[64];
-    std::snprintf(text, sizeof text, "%s %s%.0f\xC2\xB0", vm_.target().c_str(), set ? "set " : "",
-                  g.separation_deg);
+    std::snprintf(text, sizeof text, "%s %s%s%.0f\xC2\xB0", vm_.target().c_str(),
+                  set ? pick(text::kSet) : "", set ? " " : "", g.separation_deg);
     lv_label_set_text(target_label_, text);
     if (projection.on_screen(p, -8)) {
         view::plot_ring(buf, kW, kH, static_cast<int>(p.x), static_cast<int>(p.y), 9, highlight);
@@ -601,17 +894,12 @@ void SkyScreen::render_guidance(uint16_t* buf, const sky::Projection& projection
 
 void SkyScreen::open_about() {
     using Page = view::widgets::TextViewer::Page;
-    const std::string url = ZEROSKY_MANUAL_URL;
+    // The manual in the user's language: docs/manual.it.md and so on.
+    const std::string url = toolkit::localized_doc_path(
+        ZEROSKY_MANUAL_URL, toolkit::i18n::code(toolkit::i18n::current()));
     Page info;
-    info.title = "About";
-    info.markdown = "# ZeroSky " APP_VERSION "\n"
-                    "A pocket planetarium for the M5Stack CardputerZero.\n"
-                    "## Manual\n"
-                    "Scan the QR code with your phone for the full manual.\n"
-                    "## Developer\n"
-                    "Andrea Salvatore (IU4APC)\n"
-                    "## License\n"
-                    "MIT. The sky data keep their own licenses: see Credits.";
+    info.title = pick(text::kAboutTitle);
+    info.markdown = std::string("# ZeroSky " APP_VERSION "\n") + pick(text::kAboutBody);
     info.build = [url](lv_obj_t* content) {
         // Dark modules on a white quiet zone: phone cameras need the contrast.
         auto* qr = lv_qrcode_create(content);
@@ -625,7 +913,7 @@ void SkyScreen::open_about() {
     std::string credits = toolkit::read_doc("CREDITS.md");
     if (credits.empty()) credits = "CREDITS.md is not installed.";
     about_ = std::make_unique<view::widgets::TextViewer>(
-        assets(), vm_.is_dark_mode(), std::vector<Page>{info, {"Credits", credits, {}}});
+        assets(), vm_.is_dark_mode(), std::vector<Page>{info, {pick(text::kCredits), credits, {}}});
 }
 
 void SkyScreen::open_location_dialog() {

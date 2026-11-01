@@ -19,6 +19,15 @@ Every change is marked with a `zerosky:` comment. Find them with `grep -rn "zero
   night theme), and `overlay_foreground()` gives the icon colour of the overlay NavBar.
 - `view/widgets/navbar.cpp`: the overlay NavBar icons and page tab use `overlay_foreground()`
   instead of plain white.
+- `app/i18n.{h,cpp}`: `current()` reads the language picked in the app (`choice_file()`,
+  `~/.config/zeroradio/lang`) after `ZERORADIO_LANG` and before the locale; `load_choice()`,
+  `save_choice()` and `code()` are new.
+- `app/docs.{h,cpp}`: `read_localized_doc()` and `localized_doc_path()` read `name.<code>.md`
+  with the English file as fallback.
+- `app/run_app.cpp`: H opens the help in the user's language, with a translated title.
+- `view/widgets/location_dialog.cpp`: title, hint and GPS rows in the seven languages.
+- `view/widgets/text_viewer.cpp`: the key hint in the seven languages.
+- `test/i18n_test.cpp`: checks for the saved choice and the translated doc paths.
 
 The shared position stays in `~/.config/zeroradio/location` on purpose, so ZeroSky and ZeroRadio use
 the same one.

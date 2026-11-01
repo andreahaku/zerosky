@@ -77,14 +77,15 @@ void usage(std::ostream& out) {
            "  --gyro-to-body 9CSV     Verified BMI270 gyro rotation\n"
            "  --pointing-body 3CSV    Verified device pointing axis\n"
            "  --screen-up-body 3CSV   Verified top edge of the display\n"
-           "  --save-frames           Validate and save frame axes, then exit\n"
+           "  --save-frames           Validate and save all sensor axes, then exit\n"
            "  --frame-mapping FILE    Frame JSON (default XDG config path)\n"
            "  --calibration FILE      Profile JSON (default XDG config path)\n"
            "  --cof FILE              WMM2025 coefficients\n"
            "  --iio-root DIR          IIO sysfs root for diagnostics\n"
            "  --help                  Show this help\n"
-           "The four frame options must be supplied together before az/alt can be\n"
-           "treated as verified. Capture requires --mag-to-body even if it is identity.\n";
+           "The four body-frame options must be supplied together before az/alt can\n"
+           "be verified. --save-frames also needs the measured --mag-to-body.\n"
+           "Capture requires --mag-to-body even if it is identity.\n";
 }
 
 bool number(const std::string& text, double& value) {
@@ -203,10 +204,14 @@ bool parse(int argc, char** argv, Options& options, std::string& error) {
         return false;
     }
     options.frame.verified = full_frame;
-    if (options.save_frames && (options.capture || !full_frame ||
+    if (options.save_frames && (options.capture || !full_frame || !options.have_mag_map ||
                                 options.frame_mapping_file.empty())) {
-        error = "--save-frames needs all four frame options and a path, without --capture";
+        error = "--save-frames needs four body frames, --mag-to-body and a path, without --capture";
         return false;
+    }
+    if (options.have_mag_map) {
+        options.frame.mag_to_body = options.mag_to_body;
+        options.frame.mag_verified = true;
     }
     if (options.capture) {
         if (!have_position || !options.have_mag_map) {

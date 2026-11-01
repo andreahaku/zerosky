@@ -7,6 +7,7 @@
 #include "text_viewer.h"
 
 #include "asset_manager.h"
+#include "i18n.h"
 #include "linux_input.h"
 #include "theme.h"
 #include "ui_const.h"
@@ -108,8 +109,19 @@ TextViewer::TextViewer(app::AssetManager& assets, bool dark_mode, std::vector<Pa
     lv_obj_set_scrollbar_mode(content_, LV_SCROLLBAR_MODE_AUTO);
 
     auto* hint = lv_label_create(root_);
-    lv_label_set_text(hint, pages_.size() > 1 ? "F/X scroll   Z/C page   Esc close"
-                                              : "F/X scroll   Esc close");
+    // zerosky: the key hint in the user's language.
+    static constexpr toolkit::i18n::Text kPaged{"F/X scroll   Z/C page   Esc close",
+                                       "F/X scorri   Z/C pagina   Esc chiudi",
+                                       "F/X défiler   Z/C page   Esc fermer",
+                                       "F/X blättern   Z/C Seite   Esc schließen",
+                                       "F/X desplazar   Z/C página   Esc cerrar",
+                                       "F/X スクロール   Z/C ページ   Esc 閉じる",
+                                       "F/X 滚动   Z/C 翻页   Esc 关闭"};
+    static constexpr toolkit::i18n::Text kSingle{"F/X scroll   Esc close", "F/X scorri   Esc chiudi",
+                                        "F/X défiler   Esc fermer", "F/X blättern   Esc schließen",
+                                        "F/X desplazar   Esc cerrar", "F/X スクロール   Esc 閉じる",
+                                        "F/X 滚动   Esc 关闭"};
+    lv_label_set_text(hint, toolkit::i18n::pick(pages_.size() > 1 ? kPaged : kSingle));
     lv_obj_set_style_text_font(hint, body_font_, 0);
     lv_obj_set_style_text_color(hint, pal.text_disabled, 0);
 

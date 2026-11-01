@@ -8,6 +8,7 @@
 
 #include "asset_manager.h"
 #include "linux_input.h"
+#include "i18n.h"
 #include "theme.h"
 #include "ui_const.h"
 
@@ -18,6 +19,45 @@ namespace {
 
 constexpr size_t kVisibleRows = 5;
 constexpr size_t kMaxQuery = 64;
+using toolkit::i18n::Text;
+using toolkit::i18n::pick;
+
+constexpr Text kTitle{"Find (%u)", "Trova (%u)", "Chercher (%u)", "Suche (%u)",
+                      "Buscar (%u)", "検索 (%u)", "搜索 (%u)"};
+constexpr Text kHint{
+    "Type name  Up/Down pick  Enter OK  Esc cancel",
+    "Nome  Su/Giù scegli  Invio OK  Esc annulla",
+    "Nom  Haut/Bas choisir  Entrée OK  Esc annuler",
+    "Name  Auf/Ab wählen  Enter OK  Esc zurück",
+    "Nombre  Arriba/Abajo elegir  Intro OK  Esc cancelar",
+    "名前を入力  上下で選択  Enter決定  Esc取消",
+    "输入名称  上下选择  回车确定  Esc取消"};
+constexpr Text kNoMatches{"No matching objects", "Nessun oggetto trovato",
+                          "Aucun objet trouvé", "Keine Treffer", "Sin resultados",
+                          "一致する天体なし", "没有匹配的天体"};
+constexpr Text kBelow{" (below)", " (sotto)", " (sous l'horizon)", " (unter Horizont)",
+                      " (bajo horizonte)", "（地平線下）", "（地平线下）"};
+
+// Inter draws Latin text; a system CJK font supplies the Japanese/Chinese
+// glyphs. Use the same search paths and preference as the sky labels.
+void attach_cjk_fallback(app::AssetManager& assets, lv_font_t* font, uint32_t size) {
+    const auto lang = toolkit::i18n::current();
+    if (!font || !toolkit::i18n::needs_cjk_font(lang)) return;
+    static constexpr const char* kJapanese[] = {
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf"};
+    static constexpr const char* kChinese[] = {
+        "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc"};
+    for (const char* path : lang == toolkit::i18n::Lang::Ja ? kJapanese : kChinese) {
+        if (lv_font_t* cjk = assets.load_font(path, size)) {
+            font->fallback = cjk;
+            return;
+        }
+    }
+}
 
 } // namespace
 
@@ -28,6 +68,8 @@ SearchDialog::SearchDialog(app::AssetManager& assets, bool dark_mode,
     const auto pal = view::palette(dark_);
     auto* heading_font = assets.load_font("inter-semibold.ttf", 14);
     auto* body_font = assets.load_font("inter-regular.ttf", 12);
+    attach_cjk_fallback(assets, heading_font, 14);
+    attach_cjk_fallback(assets, body_font, 12);
     const lv_font_t* fallback = &lv_font_montserrat_12;
 
     root_ = lv_obj_create(lv_layer_top());
@@ -67,7 +109,7 @@ SearchDialog::SearchDialog(app::AssetManager& assets, bool dark_mode,
     auto* hint = lv_label_create(root_);
     lv_obj_set_width(hint, LV_PCT(100));
     lv_label_set_long_mode(hint, LV_LABEL_LONG_DOT);
-    lv_label_set_text(hint, "Type name  Up/Down pick  Enter OK  Esc cancel");
+    lv_label_set_text(hint, pick(kHint));
     lv_obj_set_style_text_font(hint, body_font ? body_font : fallback, 0);
     lv_obj_set_style_text_color(hint, pal.text_disabled, 0);
 
@@ -128,7 +170,7 @@ void SearchDialog::search() {
 void SearchDialog::render() {
     if (!root_) return;
     const auto pal = view::palette(dark_);
-    lv_label_set_text_fmt(title_, "Find (%u)", static_cast<unsigned>(matches_.size()));
+    lv_label_set_text_fmt(title_, pick(kTitle), static_cast<unsigned>(matches_.size()));
     lv_label_set_text_fmt(input_, "> %s_", query_.c_str());
 
     if (selected_ >= first_visible_ + rows_.size())
@@ -147,10 +189,10 @@ void SearchDialog::render() {
         const bool above = !empty && items_[matches_[match]].above_horizon;
         const bool highlighted = !empty && match == selected_;
         if (empty) {
-            lv_label_set_text(row, "No matching objects");
+            lv_label_set_text(row, pick(kNoMatches));
         } else {
             const auto& item = items_[matches_[match]];
-            const std::string line = item.name + (above ? "" : " (below)") +
+            const std::string line = item.name + (above ? "" : pick(kBelow)) +
                                      (item.detail.empty() ? "" : "  " + item.detail);
             lv_label_set_text(row, line.c_str());
         }

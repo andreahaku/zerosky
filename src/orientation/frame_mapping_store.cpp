@@ -31,14 +31,14 @@ public:
     bool mapping(FrameMapping& out) {
         if (!take('{')) return false;
         unsigned fields = 0;
+        double schema = 0;
         do {
             std::string key;
             if (!string(key) || !take(':')) return false;
             unsigned bit = 0;
             if (key == "schema") {
                 bit = 1;
-                double version = 0;
-                if (!number(version) || version != 1.0) return false;
+                if (!number(schema) || (schema != 1.0 && schema != 2.0)) return false;
             } else if (key == "accel_to_body") {
                 bit = 2;
                 if (!matrix3(out.accel_to_body)) return false;
@@ -51,6 +51,9 @@ public:
             } else if (key == "screen_up_body") {
                 bit = 16;
                 if (!vector3(out.screen_up_body)) return false;
+            } else if (key == "mag_to_body") {
+                bit = 32;
+                if (!matrix3(out.mag_to_body)) return false;
             } else {
                 return false;
             }
@@ -60,7 +63,8 @@ public:
             if (!take(',')) return false;
         } while (true);
         spaces();
-        return fields == 31 && at_ == text_.size();
+        out.mag_verified = schema == 2.0;
+        return fields == (schema == 2.0 ? 63u : 31u) && at_ == text_.size();
     }
 
 private:
@@ -147,8 +151,8 @@ double determinant(const Matrix3& a) {
            a[0][2] * (a[1][0] * a[2][1] - a[1][1] * a[2][0]);
 }
 
-bool rotation(const Matrix3& a) {
-    if (!std::isfinite(determinant(a)) || std::abs(determinant(a) - 1.0) > 1e-3)
+bool orthogonal(const Matrix3& a) {
+    if (!std::isfinite(determinant(a)) || std::abs(std::abs(determinant(a)) - 1.0) > 1e-3)
         return false;
     for (size_t i = 0; i < 3; ++i) {
         for (size_t j = 0; j < 3; ++j) {
@@ -159,6 +163,10 @@ bool rotation(const Matrix3& a) {
         }
     }
     return true;
+}
+
+bool rotation(const Matrix3& a) {
+    return orthogonal(a) && determinant(a) > 0.0;
 }
 
 bool axes(sensors::Vec3 pointing, sensors::Vec3 screen_up) {
@@ -175,7 +183,8 @@ bool axes(sensors::Vec3 pointing, sensors::Vec3 screen_up) {
 
 bool valid(const FrameMapping& mapping) {
     return rotation(mapping.accel_to_body) && rotation(mapping.gyro_to_body) &&
-           axes(mapping.pointing_body, mapping.screen_up_body);
+           axes(mapping.pointing_body, mapping.screen_up_body) &&
+           (!mapping.mag_verified || orthogonal(mapping.mag_to_body));
 }
 
 void vector_json(std::ostream& out, sensors::Vec3 v) {
@@ -249,7 +258,7 @@ bool load_frame_mapping(const std::filesystem::path& file,
 bool save_frame_mapping(const std::filesystem::path& file,
                         const FrameMapping& mapping, std::string& error) {
     error.clear();
-    if (file.empty() || !mapping.verified || !valid(mapping)) {
+    if (file.empty() || !mapping.verified || !mapping.mag_verified || !valid(mapping)) {
         error = "Frame mapping is unverified or invalid";
         return false;
     }
@@ -275,10 +284,12 @@ bool save_frame_mapping(const std::filesystem::path& file,
 
     std::ostringstream stream;
     stream.imbue(std::locale::classic());
-    stream << std::setprecision(17) << "{\"schema\":1,\"accel_to_body\":";
+    stream << std::setprecision(17) << "{\"schema\":2,\"accel_to_body\":";
     matrix_json(stream, mapping.accel_to_body);
     stream << ",\"gyro_to_body\":";
     matrix_json(stream, mapping.gyro_to_body);
+    stream << ",\"mag_to_body\":";
+    matrix_json(stream, mapping.mag_to_body);
     stream << ",\"pointing_body\":";
     vector_json(stream, mapping.pointing_body);
     stream << ",\"screen_up_body\":";

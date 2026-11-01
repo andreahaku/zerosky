@@ -50,6 +50,11 @@ private:
     int height_;
 };
 
+// The camera turned by small angles in its own frame: `right_deg` towards
+// screen right, `up_deg` towards screen up. A misaligned lens is offset in the
+// device frame, so the correction must turn with the roll.
+Camera offset_camera(const Camera& camera, double right_deg, double up_deg);
+
 // The unit vector of a direction in the east-north-up frame.
 void enu_from_horizontal(double azimuth_deg, double altitude_deg, double out[3]);
 

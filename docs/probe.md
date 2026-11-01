@@ -32,7 +32,8 @@ zerosky_probe --capture none --lat 36.05 --lon 14.24 --height-m 0 \
 ```
 
 Rotate through all three dimensions for the entire capture, including inverted
-poses. The fit needs at least 500 distinct samples, every octant, an axis ratio
+poses. The fit needs at least 200 distinct samples, at least 15 in each octant,
+an axis ratio
 below four, and a held-out RMS below 5 µT. If any check fails, the existing
 profile remains in place. A successful save writes
 `~/.config/zerosky/magnetometer-calibration.json` (or `$XDG_CONFIG_HOME`) and
@@ -48,13 +49,14 @@ must not be nearly parallel. The probe rejects an incomplete set. Compare the
 output with an independent sky or geographic reference in several directions
 before treating the heading as accurate.
 
-Once these axes have been measured, save them for the app with the same four
-options plus `--save-frames`. This validates the matrices and axes, writes
+Once these axes and the magnetometer frame have been measured, save them for the app
+with the same four options, `--mag-to-body`, and `--save-frames`. This validates
+the matrices and axes, writes a schema-2
 `~/.config/zerosky/frame-mapping.json` (or `$XDG_CONFIG_HOME`) atomically, and
 exits without opening IIO. `--frame-mapping FILE` overrides the path. A previous
-valid mapping is preserved at `.bak`. The magnetometer's `--mag-to-body` is
-stored separately with its calibration profile; it is still required for
-`--capture`.
+valid mapping is preserved at `.bak`. Schema-1 files remain readable, but do
+not prove the magnetometer frame. The magnetometer's `--mag-to-body` is also
+stored with its calibration profile and remains required for `--capture`.
 
 ## Measured on CardputerZero v5
 

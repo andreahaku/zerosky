@@ -26,6 +26,19 @@ double decimal_year_now() {
         .value_or(0.0);
 }
 
+std::string utc_timestamp() {
+    const std::time_t now = std::time(nullptr);
+    std::tm utc{};
+    if (!gmtime_r(&now, &utc)) return {};
+    char text[32]{};
+    if (std::strftime(text, sizeof(text), "%Y-%m-%dT%H:%M:%SZ", &utc) == 0) return {};
+    return text;
+}
+
+std::filesystem::path calibration_file() {
+    return toolkit::config_file("zerosky", "magnetometer-calibration.json");
+}
+
 } // namespace
 
 AttitudeController::AttitudeController() : mapping_(std::make_unique<orientation::FrameMapping>()) {
@@ -57,6 +70,7 @@ void AttitudeController::start(const sky::Observer& observer, const std::string&
             unavailable_ = "no IMU";
             return;
         }
+        magnetometer_present_ = source->info().magnetic_present;
         service_ = std::make_unique<orientation::AttitudeService>(std::move(source));
         if (!service_->set_frame_mapping(*mapping_, error)) {
             unavailable_ = "bad axes file";
@@ -65,7 +79,7 @@ void AttitudeController::start(const sky::Observer& observer, const std::string&
         }
         // A missing profile leaves the compass unreliable; the status says so.
         service_->select_configuration(
-            hardware, toolkit::config_file("zerosky", "magnetometer-calibration.json"), error);
+            hardware, calibration_file(), error);
         if (!service_->start(error)) {
             unavailable_ = "IMU did not start";
             service_.reset();
@@ -96,7 +110,78 @@ void AttitudeController::select_hardware(const std::string& hardware) {
     if (!service_) return;
     std::string error;
     service_->select_configuration(
-        hardware, toolkit::config_file("zerosky", "magnetometer-calibration.json"), error);
+        hardware, calibration_file(), error);
+}
+
+bool AttitudeController::begin_calibration(const sky::Observer& observer,
+                                           const std::string& hardware, std::string& error) {
+    cancel_calibration_capture();
+    if (!mapping_->verified) {
+        error = "Frame axes are not measured; use zerosky_probe";
+        return false;
+    }
+    if (!service_ || !magnetometer_present_) {
+        error = "BMM150 magnetometer is not available";
+        return false;
+    }
+    if (!model_) {
+        error = "WMM2025 model is not available";
+        return false;
+    }
+    const auto field = model_->field(observer.latitude_deg, observer.longitude_deg,
+                                     observer.height_m, decimal_year_now());
+    if (!field) {
+        error = "Cannot calculate WMM2025 field for this position and date";
+        return false;
+    }
+    orientation::Matrix3 mag_to_body{};
+    if (!orientation::resolve_magnetic_frame(*mapping_, calibration_file(), mag_to_body, error))
+        return false;
+    const std::string measured_at = utc_timestamp();
+    if (measured_at.empty()) { error = "Cannot read the UTC clock"; return false; }
+    if (!service_->begin_calibration_capture(hardware, error)) return false;
+    calibration_ = std::make_unique<orientation::CalibrationFlow>(
+        hardware, field->total_uT, mag_to_body,
+        orientation::CalibrationMetadata{measured_at, observer.latitude_deg, observer.longitude_deg},
+        calibration_file(), std::chrono::steady_clock::now(), field->inclination_deg);
+    return true;
+}
+
+AttitudeController::CalibrationStatus AttitudeController::calibration_status() {
+    CalibrationStatus out;
+    if (!calibration_) { out.error = "Calibration was not started"; return out; }
+    const auto now = std::chrono::steady_clock::now();
+    if (calibration_->stage() == orientation::CalibrationStage::Capturing) {
+        if (calibration_->needs_preview(service_->calibration_capture_count()))
+            calibration_->update(service_->calibration_capture_snapshot());
+        if (calibration_->should_finish(now))
+            calibration_->finish(service_->end_calibration_capture());
+    }
+    out.stage = calibration_->stage();
+    out.coverage = calibration_->coverage();
+    out.missing_pose = calibration_->missing_pose();
+    out.seconds_left = calibration_->seconds_left(now);
+    out.field_uT = calibration_->field_uT();
+    out.rms_uT = calibration_->result().rms_uT;
+    out.error = calibration_->error();
+    return out;
+}
+
+bool AttitudeController::save_calibration_capture(std::string& error) {
+    if (!calibration_ || !calibration_->save(error)) return false;
+    const auto hardware = calibration_->result().configuration;
+    if (!service_->select_configuration(hardware, calibration_file(), error)) {
+        error = "Profile saved, but reload failed: " + error;
+    }
+    return true;
+}
+
+void AttitudeController::cancel_calibration_capture() {
+    if (!calibration_) return;
+    if (calibration_->stage() == orientation::CalibrationStage::Capturing && service_)
+        service_->end_calibration_capture();
+    calibration_->cancel();
+    calibration_.reset();
 }
 
 std::string AttitudeController::status() const {

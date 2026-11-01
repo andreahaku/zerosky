@@ -28,6 +28,9 @@ struct FrameMapping {
     // These map raw IIO sensor frames into the physical device body frame.
     Matrix3 accel_to_body{{{1, 0, 0}, {0, 1, 0}, {0, 0, 1}}};
     Matrix3 gyro_to_body{{{1, 0, 0}, {0, 1, 0}, {0, 0, 1}}};
+    // Measured BMM150 axes. An old schema-1 file leaves this unverified.
+    Matrix3 mag_to_body{{{1, 0, 0}, {0, 1, 0}, {0, 0, 1}}};
+    bool mag_verified = false;
     sensors::Vec3 pointing_body{0, 0, 1};
     // Direction of the top edge of the display, perpendicular to pointing_body.
     sensors::Vec3 screen_up_body{0, 1, 0};
@@ -92,6 +95,8 @@ public:
     // Captures fresh, uncalibrated BMM150 samples for a later ellipsoid fit.
     // Collection is bounded to 6000 samples and never writes a profile itself.
     bool begin_calibration_capture(const std::string& hardware, std::string& error);
+    size_t calibration_capture_count() const;
+    std::vector<CalibrationSample> calibration_capture_snapshot() const;
     std::vector<CalibrationSample> end_calibration_capture();
 
 private:

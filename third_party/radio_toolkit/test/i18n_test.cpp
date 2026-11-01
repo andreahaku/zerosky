@@ -6,10 +6,15 @@
 
 // toolkit::i18n: locale names to languages, and the English fallback.
 
+#include "docs.h"
 #include "i18n.h"
 
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <string>
+#include <unistd.h>
 
 using namespace toolkit::i18n;
 
@@ -55,6 +60,32 @@ int main() {
     const Text none{};
     check(none.empty(), "default Text is empty");
     check(std::strcmp(pick(none, Lang::Es), "") == 0, "empty Text picks an empty string");
+
+    // zerosky: the in-app language choice and the translated docs.
+    check(std::strcmp(code(Lang::En), "en") == 0 && std::strcmp(code(Lang::Zh), "zh") == 0, "codes");
+    const auto dir = std::filesystem::temp_directory_path() /
+                     ("zerosky_i18n_test_" + std::to_string(getpid()));
+    const auto file = dir / "zeroradio" / "lang";
+    check(!load_choice(file), "no file -> follow the locale");
+    check(save_choice(file, Lang::It) && load_choice(file) == Lang::It, "save and load it");
+    check(save_choice(file, Lang::En) && load_choice(file) == Lang::En, "en is a real choice");
+    check(save_choice(file, std::nullopt) && !std::filesystem::exists(file), "auto removes the file");
+    check(save_choice(file, std::nullopt), "auto without a file is fine");
+    std::filesystem::create_directories(file.parent_path());
+    std::ofstream(file) << "de\r\n";
+    check(load_choice(file) == Lang::De, "CRLF is tolerated");
+    std::ofstream(file) << "auto\n";
+    check(!load_choice(file), "auto -> follow the locale");
+    std::ofstream(file) << "ko\n";
+    check(!load_choice(file), "an unsupported code -> follow the locale");
+    std::filesystem::remove_all(dir);
+
+    using toolkit::localized_doc_path;
+    check(localized_doc_path("docs/help/zerosky.md", "it") == "docs/help/zerosky.it.md", "help it");
+    check(localized_doc_path("docs/help/zerosky.md", "en") == "docs/help/zerosky.md", "help en");
+    check(localized_doc_path("https://x.org/a.b/docs/manual.md", "ja") ==
+              "https://x.org/a.b/docs/manual.ja.md", "manual URL ja");
+    check(localized_doc_path("docs.v2/README", "fr") == "docs.v2/README.fr", "no extension");
 
     if (failures == 0) std::printf("i18n_test: all checks passed\n");
     return failures == 0 ? 0 : 1;

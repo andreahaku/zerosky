@@ -123,9 +123,13 @@ int main() {
     require(current.simulated, "Simulated source not labeled");
     require(std::abs(current.pointing_azimuth_deg) < 0.01, "Wrong azimuth");
     require(std::abs(current.pointing_altitude_deg) < 0.01, "Wrong altitude");
+    require(service.calibration_capture_count() > 0,
+            "Lightweight capture count did not advance");
     const auto captured = service.end_calibration_capture();
     require(!captured.empty(), "No raw magnetic samples captured");
     require(captured.size() <= 6000, "Capture exceeded its bound");
+    require(service.calibration_capture_count() == 0,
+            "Capture count did not reset after end");
     service.stop();
 
     // Starting more than 120 degrees from the true heading used to take many

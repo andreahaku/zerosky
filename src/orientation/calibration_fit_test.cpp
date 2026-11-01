@@ -6,6 +6,7 @@
 
 #include "calibration_fit.h"
 
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
@@ -74,7 +75,31 @@ int main() {
     std::string error;
     require(fit_magnetometer_calibration(samples, "none", 44.9, identity, fit, error),
             error.c_str());
-    require(fit.samples >= 500 && fit.rms_uT < 1.0, "Synthetic fit quality");
+    require(fit.samples >= kCalibrationMinIndependent && fit.rms_uT < 1.0, "Synthetic fit quality");
+    // Exactly the new minimum, balanced across all eight octants, must both
+    // fit and pass save validation (a separate gate from the fitter).
+    std::array<int, 8> balanced_counts{};
+    std::vector<CalibrationSample> balanced;
+    for (const auto& sample : samples) {
+        const auto raw = sample.raw_magnetic_uT;
+        const int octant = (raw.x >= 12.0 ? 1 : 0) |
+                           (raw.y >= -8.0 ? 2 : 0) |
+                           (raw.z >= 4.0 ? 4 : 0);
+        if (balanced_counts[octant] < 25) {
+            balanced.push_back(sample);
+            ++balanced_counts[octant];
+        }
+    }
+    require(balanced.size() == kCalibrationMinIndependent, "Could not balance minimum capture");
+    Calibration minimum_fit;
+    require(fit_magnetometer_calibration(balanced, "none", 44.9, identity,
+                                         minimum_fit, error), error.c_str());
+    const auto minimum_file = std::filesystem::temp_directory_path() /
+                              ("zerosky_minimum_calibration_" + std::to_string(::getpid()) + ".json");
+    require(save_calibration(minimum_file, minimum_fit,
+                             {"2026-10-20T12:00:00Z", 36.05, 14.24}, error), error.c_str());
+    std::filesystem::remove(minimum_file);
+    std::filesystem::remove(minimum_file.string() + ".bak");
     require(std::abs(fit.offset_uT.x - 12.0) < 1.0 &&
             std::abs(fit.offset_uT.y + 8.0) < 1.0 &&
             std::abs(fit.offset_uT.z - 4.0) < 1.0, "Hard-iron offset recovery");
@@ -89,6 +114,24 @@ int main() {
     require(std::sqrt(squared_error / samples.size()) < 1.0,
             "Soft-iron correction recovery");
 
+    // A stationary start must not dominate the preview centre used by the
+    // capture dialog. The first pose is deliberately disturbed; once the
+    // device moves, the full sphere should determine the preview.
+    auto stationary_start = std::vector<CalibrationSample>(2000, samples.front());
+    for (auto& sample : stationary_start) sample.raw_magnetic_uT.x += 18.0;
+    auto incomplete = stationary_start;
+    incomplete.insert(incomplete.end(), samples.begin(), samples.begin() + 98);
+    stationary_start.insert(stationary_start.end(), samples.begin(), samples.end());
+    zerosky::sensors::Vec3 preview_centre{};
+    require(!estimate_magnetometer_centre(incomplete, 44.9, preview_centre),
+            "Repeated stationary reads counted as independent preview poses");
+    require(estimate_magnetometer_centre(stationary_start, 44.9, preview_centre),
+            "Stationary start prevented centre preview");
+    require(std::abs(preview_centre.x - 12.0) < 2.0 &&
+            std::abs(preview_centre.y + 8.0) < 2.0 &&
+            std::abs(preview_centre.z - 4.0) < 2.0,
+            "Stationary start biased centre preview");
+
     Calibration reflected_fit;
     require(fit_magnetometer_calibration(samples, "none", 44.9, reflected,
                                          reflected_fit, error), error.c_str());
@@ -101,9 +144,9 @@ int main() {
             "Reflected magnetometer frame not applied");
 
     auto too_few = samples;
-    too_few.resize(499);
+    too_few.resize(kCalibrationMinIndependent - 1);
     require(!fit_magnetometer_calibration(too_few, "none", 44.9, identity, fit, error),
-            "Accepted fewer than 500 samples");
+            "Accepted fewer than 200 samples");
     require(!fit_magnetometer_calibration(generate(true), "none", 44.9,
                                          identity, fit, error),
             "Accepted incomplete octants");

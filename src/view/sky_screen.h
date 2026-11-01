@@ -10,15 +10,18 @@
 #include "camera_source.h"
 #include "beeper.h"
 #include "constellations.h"
+#include "constellation_names.h"
 #include "deep_sky.h"
 #include "location_dialog.h"
 #include "search_dialog.h"
+#include "calibration_dialog.h"
 #include "sky_engine.h"
 #include "sky_viewmodel.h"
 #include "star_catalog.h"
 #include "text_viewer.h"
 
 #include <array>
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <vector>
@@ -52,12 +55,14 @@ private:
     SkyViewModel& vm_;
     sky::StarCatalog catalog_;
     sky::ConstellationLines lines_;
+    sky::ConstellationNames constellation_names_;
     sky::DeepSkyCatalog deep_sky_;
     // Horizontal positions, recomputed every few seconds: the sky turns 0.25
     // degrees a minute, so the projection runs on cached positions every frame.
     std::vector<sky::Horizontal> star_positions_;
     std::vector<sky::BodyPosition> bodies_;
     std::vector<std::array<sky::Horizontal, 2>> line_positions_;
+    std::vector<sky::Horizontal> constellation_name_positions_;
     std::vector<sky::Horizontal> deep_sky_positions_;
     double sky_utc_{0.0};
     double twilight_magnitude_{6.0};
@@ -65,16 +70,29 @@ private:
 
     std::vector<uint16_t> pixels_;
     lv_obj_t* canvas_{nullptr};
-    lv_obj_t* status_{nullptr};
+    lv_obj_t* status_{nullptr};   // top left: azimuth, altitude, FOV
+    lv_obj_t* place_{nullptr};    // top right: the position, shortened
+    lv_obj_t* notice_{nullptr};   // second line: mode and warnings
+    lv_obj_t* panel_{nullptr};    // a box for camera start-up and Align help
+    lv_obj_t* panel_text_{nullptr};
+    std::chrono::steady_clock::time_point camera_started_at_{};
+    std::chrono::steady_clock::time_point align_started_at_{};
+    bool align_steps_started_{false};
+    int seen_language_version_{0};
+    std::chrono::steady_clock::time_point language_note_until_{};
+    void update_panel(bool photo);
     lv_obj_t* target_label_{nullptr};
     int label_style_{-1}; // theme + photo the labels are painted for; -1 before the first frame
     audio::Beeper beeper_;
     std::array<lv_obj_t*, 8> cardinals_{};
     std::array<lv_obj_t*, 9> body_labels_{};
+    std::array<lv_obj_t*, 14> constellation_labels_{};
+    std::array<lv_obj_t*, 24> deep_labels_{};
     lv_timer_t* timer_{nullptr};
     std::unique_ptr<toolkit::LocationDialog> location_dialog_;
     std::unique_ptr<view::widgets::TextViewer> about_;
     std::unique_ptr<SearchDialog> search_;
+    std::unique_ptr<CalibrationDialog> calibration_;
     std::unique_ptr<camera::CameraSource> camera_;
     camera::CameraFrame camera_frame_;
     std::string camera_logged_error_;

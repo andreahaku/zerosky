@@ -62,6 +62,29 @@ void guidance_points_the_way() {
     require(g_here.separation_deg < 1e-6, "target on the centre is not centred");
 }
 
+void offset_turns_with_roll() {
+    const Camera level{90.0, 20.0, 0.0, 60.0};
+    const Camera same = offset_camera(level, 0.0, 0.0);
+    require(near(same.azimuth_deg, 90.0, 1e-9) && near(same.altitude_deg, 20.0, 1e-9) &&
+                near(same.roll_deg, 0.0, 1e-9),
+            "zero offset changes the camera");
+    // Level: an offset to the right turns the azimuth, not the altitude.
+    const Camera right = offset_camera(level, 2.0, 0.0);
+    require(right.azimuth_deg > 91.5 && near(right.altitude_deg, 20.0, 0.1), "right offset wrong");
+    // Rolled 90 degrees clockwise, screen right looks up the sky (see
+    // roll_turns_clockwise), so the same offset raises the altitude instead.
+    const Camera rolled{90.0, 20.0, 90.0, 60.0};
+    const Camera rolled_right = offset_camera(rolled, 2.0, 0.0);
+    require(rolled_right.altitude_deg > 21.5 && near(rolled_right.azimuth_deg, 90.0, 0.2),
+            "offset does not turn with the roll");
+    // The new camera centre is where the old camera saw the offset point.
+    const Projection old_view(rolled, kW, kH);
+    const auto p = old_view.project(rolled_right.azimuth_deg, rolled_right.altitude_deg);
+    const double expected_dx = (kW / 2.0) / std::tan(30.0 * M_PI / 180.0) * std::tan(2.0 * M_PI / 180.0);
+    require(near(p.x - kW / 2.0, expected_dx, 0.05) && near(p.y, kH / 2.0, 0.05),
+            "offset point not on screen right");
+}
+
 } // namespace
 
 int main() {
@@ -69,6 +92,7 @@ int main() {
         centre_and_edges();
         roll_turns_clockwise();
         guidance_points_the_way();
+        offset_turns_with_roll();
     } catch (const std::exception& e) {
         std::fprintf(stderr, "FAIL: %s\n", e.what());
         return 1;

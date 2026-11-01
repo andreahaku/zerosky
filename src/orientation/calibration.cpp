@@ -5,6 +5,7 @@
  */
 
 #include "calibration.h"
+#include "calibration_fit.h"
 
 #include <cmath>
 #include <atomic>
@@ -412,7 +413,7 @@ bool save_calibration(const std::filesystem::path& file,
         !orthogonal_matrix(calibration.sensor_to_body) ||
         !std::isfinite(calibration.field_uT) || calibration.field_uT <= 0 ||
         !std::isfinite(calibration.rms_uT) || calibration.rms_uT >= 5.0 ||
-        calibration.samples < 500 ||
+        calibration.samples < static_cast<int>(kCalibrationMinIndependent) ||
         !std::isfinite(metadata.latitude_deg) ||
         std::abs(metadata.latitude_deg) > 90 ||
         !std::isfinite(metadata.longitude_deg) ||

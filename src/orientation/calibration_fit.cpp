@@ -10,6 +10,7 @@
 #include <array>
 #include <cmath>
 #include <limits>
+#include <utility>
 
 namespace zerosky::orientation {
 namespace {
@@ -203,6 +204,41 @@ bool orthogonal(const Matrix3& a) {
 
 } // namespace
 
+bool estimate_magnetometer_centre(const std::vector<CalibrationSample>& samples,
+                                  double expected_field_uT, sensors::Vec3& centre_uT) {
+    if (!std::isfinite(expected_field_uT) || expected_field_uT <= 0) return false;
+    std::vector<Vec> training;
+    training.reserve(samples.size());
+    for (const auto& sample : samples) {
+        Vec point = array(sample.raw_magnetic_uT);
+        if (!std::isfinite(point[0]) || !std::isfinite(point[1]) ||
+            !std::isfinite(point[2])) continue;
+        for (double& value : point) value /= expected_field_uT;
+        // Both operands are now in units of the expected field. The threshold
+        // is the final fit's 0.5 uT movement gate in those normalized units.
+        if (!training.empty() && squared_distance(point, training.back()) <
+                                     0.25 / (expected_field_uT * expected_field_uT))
+            continue;
+        training.push_back(point);
+    }
+    if (training.size() < 100) return false;
+    // Progress runs on the UI thread. A spread of 256 poses gives a useful
+    // centre estimate without repeating the full final fit every half-second.
+    if (training.size() > 256) {
+        std::vector<Vec> preview;
+        preview.reserve(256);
+        for (size_t i = 0; i < 256; ++i)
+            preview.push_back(training[i * (training.size() - 1) / 255]);
+        training = std::move(preview);
+    }
+    Params p{};
+    if (!fit(training, p)) return false;
+    centre_uT = {p[0] * expected_field_uT, p[1] * expected_field_uT,
+                 p[2] * expected_field_uT};
+    return std::isfinite(centre_uT.x) && std::isfinite(centre_uT.y) &&
+           std::isfinite(centre_uT.z);
+}
+
 bool fit_magnetometer_calibration(const std::vector<CalibrationSample>& samples,
                                   const std::string& configuration,
                                   double expected_field_uT,
@@ -226,8 +262,8 @@ bool fit_magnetometer_calibration(const std::vector<CalibrationSample>& samples,
             continue;
         independent.push_back(value);
     }
-    if (independent.size() < 500) {
-        error = "Calibration needs at least 500 independent samples";
+    if (independent.size() < kCalibrationMinIndependent) {
+        error = "Calibration needs at least 200 independent samples";
         return false;
     }
     std::vector<Vec> training, held_out;
@@ -262,7 +298,7 @@ bool fit_magnetometer_calibration(const std::vector<CalibrationSample>& samples,
         ++octants[octant];
     }
     if (std::any_of(octants.begin(), octants.end(),
-                    [](int count) { return count < 10; })) {
+                    [](int count) { return count < static_cast<int>(kCalibrationMinPerOctant); })) {
         error = "Calibration does not cover all eight octants";
         return false;
     }

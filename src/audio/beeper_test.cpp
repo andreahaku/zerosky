@@ -28,10 +28,10 @@ int main() {
 
         const auto far = guidance_tone(90.0);
         require(far.enabled && !far.continuous && far.frequency_hz == 400.0 &&
-                    far.interval_ms == 900 && far.pulse_ms == 40, "far endpoint wrong");
+                    far.interval_ms == 900 && far.pulse_ms == 150, "far endpoint wrong");
         const auto near = guidance_tone(1.0);
         require(near.enabled && !near.continuous && near.frequency_hz == 1600.0 &&
-                    near.interval_ms == 120, "near endpoint wrong");
+                    near.interval_ms == 120 && near.pulse_ms == 50, "near endpoint wrong");
         require(guidance_tone(180.0).frequency_hz == far.frequency_hz,
                 "wide separation should clamp");
 
@@ -40,7 +40,8 @@ int main() {
             const auto tone = guidance_tone(angle);
             require(tone.frequency_hz > prior.frequency_hz, "pitch must rise toward target");
             require(tone.interval_ms < prior.interval_ms, "pulses must accelerate toward target");
-            require(tone.pulse_ms == 40, "pulse length changed");
+            require(tone.pulse_ms <= prior.pulse_ms && tone.pulse_ms < tone.interval_ms,
+                    "beeps must shorten and leave a gap");
             prior = tone;
         }
 
@@ -49,6 +50,13 @@ int main() {
             require(tone.enabled && tone.continuous && tone.frequency_hz == 1600.0,
                     "center should have continuous high tone");
         }
+        const auto success = notification_tones(true);
+        const auto failure = notification_tones(false);
+        require(success[0].duration_ms > 0 && success[1].duration_ms > 0 &&
+                    success[1].frequency_hz > success[0].frequency_hz,
+                "success notification must rise twice");
+        require(failure[0].duration_ms > 0 && failure[0].frequency_hz < success[0].frequency_hz &&
+                    failure[1].duration_ms == 0, "failure notification must be one low tone");
     } catch (const std::exception& e) {
         std::fprintf(stderr, "FAIL: %s\n", e.what());
         return 1;

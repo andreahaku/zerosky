@@ -47,6 +47,8 @@ FrameMapping measured() {
     mapping.gyro_to_body = {{{0, -1, 0}, {1, 0, 0}, {0, 0, 1}}};
     mapping.pointing_body = {0, 1, 0};
     mapping.screen_up_body = {0, 0, 1};
+    mapping.mag_to_body = {{{-1, 0, 0}, {0, 1, 0}, {0, 0, -1}}};
+    mapping.mag_verified = true;
     mapping.verified = true;
     return mapping;
 }
@@ -65,8 +67,19 @@ void round_trip_and_backup(const std::filesystem::path& file) {
             "Frame mapping permissions are not private");
     require(load_frame_mapping(file, loaded, error) && loaded.verified, error.c_str());
     require(loaded.gyro_to_body[0][1] == -1 && loaded.pointing_body.y == 1 &&
-                loaded.screen_up_body.z == 1, "Loaded frame differs");
+                loaded.screen_up_body.z == 1 && loaded.mag_verified &&
+                loaded.mag_to_body[0][0] == -1, "Loaded frame differs");
     const std::string original = read_text(file);
+
+    // The frame file already installed on older devices must still load. It
+    // verifies the body axes, but cannot claim the BMM150 frame was measured.
+    const auto legacy = replace_once(
+        replace_once(original, "\"schema\":2", "\"schema\":1"),
+        "\"mag_to_body\":[[-1,0,0],[0,1,0],[0,0,-1]],", "");
+    write_text(file, legacy);
+    require(load_frame_mapping(file, loaded, error) && loaded.verified &&
+                !loaded.mag_verified, "Schema-1 frame did not load safely");
+    write_text(file, original);
 
     FrameMapping second = first;
     second.pointing_body = {1, 0, 0};
@@ -75,6 +88,15 @@ void round_trip_and_backup(const std::filesystem::path& file) {
     require(read_text(file.string() + ".bak") == original, "Backup does not contain prior frame");
     require(load_frame_mapping(file, loaded, error) && loaded.pointing_body.x == 1,
             "Second frame not loaded");
+
+    FrameMapping reflected = first;
+    reflected.mag_to_body = {{{1, 0, 0}, {0, -1, 0}, {0, 0, 1}}};
+    const auto reflected_file = file.parent_path() / "reflected-frame.json";
+    require(save_frame_mapping(reflected_file, reflected, error),
+            "A measured magnetometer reflection was rejected");
+    require(load_frame_mapping(reflected_file, loaded, error) &&
+                loaded.mag_verified && loaded.mag_to_body == reflected.mag_to_body,
+            "Magnetometer reflection did not round-trip");
 
     const std::string before_failure = read_text(file);
     second.verified = false;
@@ -88,6 +110,9 @@ void round_trip_and_backup(const std::filesystem::path& file) {
     second = first;
     second.pointing_body.y = 1.1;
     require(!save_frame_mapping(file, second, error), "Saved non-unit axis");
+    second = first;
+    second.mag_to_body[0][0] = 0.5;
+    require(!save_frame_mapping(file, second, error), "Saved invalid magnetometer frame");
     require(read_text(file) == before_failure, "Rejected save changed frame file");
 }
 
@@ -97,10 +122,11 @@ void reject_bad_files(const std::filesystem::path& file) {
     const std::string pointing = "\"pointing_body\":[1,0,0]";
     const std::string up = "\"screen_up_body\":[0,0,1]";
     const std::string bad[] = {
-        replace_once(good, "\"schema\":1", "\"schema\":2"),
-        replace_once(good, "\"schema\":1,", ""),
-        replace_once(good, "\"schema\":1,", "\"schema\":1,\"schema\":1,"),
-        replace_once(good, "\"schema\":1,", "\"schema\":1,\"extra\":0,"),
+        replace_once(good, "\"schema\":2", "\"schema\":3"),
+        replace_once(good, "\"schema\":2,", ""),
+        replace_once(good, "\"schema\":2,", "\"schema\":2,\"schema\":2,"),
+        replace_once(good, "\"schema\":2,", "\"schema\":2,\"extra\":0,"),
+        replace_once(good, "\"mag_to_body\":[[-1,0,0],[0,1,0],[0,0,-1]],", ""),
         replace_once(good, matrix, "[[2,0,0],[0,1,0],[0,0,1]]"),
         replace_once(good, pointing, "\"pointing_body\":[2,0,0]"),
         replace_once(good, up, "\"screen_up_body\":[1,0,0]"),

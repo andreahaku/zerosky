@@ -7,6 +7,7 @@
 #include "location_dialog.h"
 
 #include "asset_manager.h"
+#include "i18n.h"
 #include "linux_input.h"
 #include "theme.h"
 #include "ui_const.h"
@@ -18,6 +19,29 @@ namespace toolkit {
 namespace {
 
 constexpr size_t kMaxCities = 4;
+
+// zerosky: the dialog in the user's language.
+using i18n::pick;
+using i18n::Text;
+constexpr Text kTitle{"Location", "Posizione", "Lieu", "Standort", "Ubicación", "位置", "位置"};
+constexpr Text kHint{"City or lat,lon   Up/Down pick   Enter OK   Esc cancel",
+                     "Città o lat,lon   Su/Giù scegli   Enter OK   Esc annulla",
+                     "Ville ou lat,lon   Haut/Bas choisir   Enter OK   Esc annuler",
+                     "Stadt oder Breite,Länge   Auf/Ab wählen   Enter OK   Esc Abbruch",
+                     "Ciudad o lat,lon   Arriba/Abajo elegir   Enter OK   Esc cancelar",
+                     "都市名か 緯度,経度   上下で選択   Enter 決定   Esc 取消",
+                     "城市或 纬度,经度   上下选择   Enter 确定   Esc 取消"};
+constexpr Text kNoReceiver{"GPS: no receiver", "GPS: nessun ricevitore", "GPS : aucun récepteur",
+                           "GPS: kein Empfänger", "GPS: sin receptor", "GPS：受信機なし", "GPS：无接收器"};
+constexpr Text kLooking{"GPS: looking for a receiver...", "GPS: cerco un ricevitore...",
+                        "GPS : recherche d'un récepteur...", "GPS: suche Empfänger...",
+                        "GPS: buscando un receptor...", "GPS：受信機を検索中...", "GPS：正在查找接收器..."};
+// "%s" is the receiver name, "%d" the satellites in view.
+constexpr Text kSearching{"%s: searching... %d sats", "%s: cerco... %d satelliti",
+                          "%s : recherche... %d sat.", "%s: suche... %d Sat.",
+                          "%s: buscando... %d sat.", "%s：測位中... 衛星 %d", "%s：定位中... %d 颗卫星"};
+constexpr Text kCoordinates{"Coordinates", "Coordinate", "Coordonnées", "Koordinaten",
+                            "Coordenadas", "座標", "坐标"};
 constexpr size_t kMaxQuery = 32;
 constexpr const char* kGnssDevice = "/dev/ttyS0"; // Cap LoRa-1262-GPS on the HAT port
 
@@ -52,7 +76,7 @@ LocationDialog::LocationDialog(app::AssetManager& assets, bool dark_mode, OnAppl
     lv_obj_set_flex_flow(root_, LV_FLEX_FLOW_COLUMN);
 
     auto* title = lv_label_create(root_);
-    lv_label_set_text(title, "Location");
+    lv_label_set_text(title, pick(kTitle));
     lv_obj_set_style_text_font(title, title_font ? title_font : fallback, 0);
     lv_obj_set_style_text_color(title, pal.primary, 0);
 
@@ -75,7 +99,7 @@ LocationDialog::LocationDialog(app::AssetManager& assets, bool dark_mode, OnAppl
     }
 
     auto* hint = lv_label_create(root_);
-    lv_label_set_text(hint, "City or lat,lon   Up/Down pick   Enter OK   Esc cancel");
+    lv_label_set_text(hint, pick(kHint));
     lv_label_set_long_mode(hint, LV_LABEL_LONG_DOT);
     lv_obj_set_width(hint, LV_PCT(100));
     lv_obj_set_style_text_font(hint, text_font ? text_font : fallback, 0);
@@ -146,7 +170,7 @@ void LocationDialog::rebuild_options() {
 
     Option gps;
     if (!gnss_) {
-        gps.text = "GPS: no receiver";
+        gps.text = pick(kNoReceiver);
     } else {
         const auto st = gnss_->status();
         const std::string name = st.source.empty() ? "GPS" : "GPS (" + st.source + ")";
@@ -155,17 +179,19 @@ void LocationDialog::rebuild_options() {
             gps.usable = true;
             gps.place = {*st.fix, "GPS " + coords_text(*st.fix)};
         } else if (st.data) {
-            gps.text = name + ": searching... " + std::to_string(st.satellites) + " sats";
+            char text[96];
+            std::snprintf(text, sizeof(text), pick(kSearching), name.c_str(), st.satellites);
+            gps.text = text;
         } else if (st.searching) {
-            gps.text = "GPS: looking for a receiver...";
+            gps.text = pick(kLooking);
         } else {
-            gps.text = "GPS: no receiver";
+            gps.text = pick(kNoReceiver);
         }
     }
     options_.push_back(gps);
 
     if (const auto pos = location::parse_coords(query_)) {
-        options_.push_back({"Coordinates " + coords_text(*pos), true, {*pos, coords_text(*pos)}});
+        options_.push_back({std::string(pick(kCoordinates)) + " " + coords_text(*pos), true, {*pos, coords_text(*pos)}});
     }
     for (const auto& city : matches_) {
         options_.push_back({city.label, true, city});

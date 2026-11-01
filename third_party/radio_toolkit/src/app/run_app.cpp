@@ -127,11 +127,13 @@ struct HelpState {
 void help_handler_trampoline(void* ctx) {
     auto* st = static_cast<HelpState*>(ctx);
     if (st->shell->help_doc().empty()) return;
-    std::string text = read_doc(st->shell->help_doc());
+    // zerosky: the help page and its title in the user's language.
+    std::string text = read_localized_doc(st->shell->help_doc());
     if (text.empty()) text = "The help page is not installed.";
+    const char* title = i18n::pick({"Help", "Aiuto", "Aide", "Hilfe", "Ayuda", "ヘルプ", "帮助"});
     st->viewer = std::make_unique<view::widgets::TextViewer>(
         *st->assets, st->shell->is_dark_mode(),
-        std::vector<view::widgets::TextViewer::Page>{{"Help", text, {}}});
+        std::vector<view::widgets::TextViewer::Page>{{title, text, {}}});
 }
 
 void home_handler_trampoline(void* ctx) {

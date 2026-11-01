@@ -1,0 +1,2 @@
+# ZeroSky: sample the BMM150 at its supported 30 Hz rate for compass capture.
+ACTION=="add", SUBSYSTEM=="iio", ATTR{name}=="bmm150", ATTR{in_magn_sampling_frequency}="30"

@@ -266,6 +266,16 @@ std::vector<CalibrationSample> AttitudeService::end_calibration_capture() {
     return std::exchange(captured_, {});
 }
 
+size_t AttitudeService::calibration_capture_count() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return captured_.size();
+}
+
+std::vector<CalibrationSample> AttitudeService::calibration_capture_snapshot() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return captured_;
+}
+
 void AttitudeService::run() {
     auto next = std::chrono::steady_clock::now();
     while (running_) {
